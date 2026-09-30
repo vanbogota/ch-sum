@@ -1,0 +1,11 @@
+services:
+  ghostwriter:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+      - ./persona:/app/persona:ro
+    # First run (interactive Telegram login):
+    #   docker compose run --rm ghostwriter login

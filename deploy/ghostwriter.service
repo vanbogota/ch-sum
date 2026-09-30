@@ -1,0 +1,28 @@
+# systemd unit (alternative to Docker).
+# Install:
+#   sudo useradd --system --create-home --home-dir /opt/ghostwriter ghostwriter
+#   sudo -u ghostwriter git clone <repo> /opt/ghostwriter/app
+#   cd /opt/ghostwriter/app && sudo -u ghostwriter python3 -m venv .venv && sudo -u ghostwriter .venv/bin/pip install .
+#   sudo -u ghostwriter .venv/bin/python -m ghostwriter login
+#   sudo cp deploy/ghostwriter.service /etc/systemd/system/ && sudo systemctl enable --now ghostwriter
+[Unit]
+Description=Ghostwriter Telegram/email assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghostwriter
+WorkingDirectory=/opt/ghostwriter/app
+EnvironmentFile=/opt/ghostwriter/app/.env
+ExecStart=/opt/ghostwriter/app/.venv/bin/python -m ghostwriter run
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ghostwriter/app/data /opt/ghostwriter/app/secrets /opt/ghostwriter/app/persona
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

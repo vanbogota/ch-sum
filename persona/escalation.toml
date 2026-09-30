@@ -1,0 +1,27 @@
+# Topics the assistant must NOT answer on its own. Incoming messages touching
+# any of these are escalated to you instead of drafted.
+#
+# description : what the classifier (Claude) looks for — the primary check
+# keywords    : case-insensitive regexes used as a hint to the classifier
+# force       : if true, a keyword hit escalates even when the classifier disagrees
+
+[[category]]
+name = "money"
+description = "Money, payments, loans, debts, prices, transfers, financial requests or offers."
+keywords = ['\bденьг', '\bзай[мн]', '\bдолг', '\bперев[её]д', '\bрубл', '\bевро\b', '\bдоллар', '\bоплат', '\bmoney\b', '\bloan\b', '\bpay(ment)?\b', '\bdebt\b']
+
+[[category]]
+name = "commitments"
+description = "Meeting up, travel, calls, visits, specific dates or deadlines, invitations, or any request that needs a yes/no commitment from the owner."
+keywords = ['\bвстрет', '\bвстреч', '\bсозвон', '\bприед', '\bзавтра\b', '\bв (понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)\b', '\bmeet\b', '\bcall\b', '\bvisit\b', '\bdeadline\b', '\btomorrow\b']
+
+[[category]]
+name = "emotional"
+description = "Emotionally heavy topics: grief, illness, serious personal problems, conflict, anger, accusations, relationship issues between the owner and the contact."
+keywords = ['\bобид', '\bпохорон', '\bумер', '\bболе[зн]', '\bсор', '\bпочему ты\b']
+
+[[category]]
+name = "ai_suspicion"
+description = "The contact asks or hints whether the owner uses a bot, AI, ChatGPT, an assistant, or whether someone else is writing."
+keywords = ['\bбот(а|ом|ы|у|ов)?\b', '\bнейросет', '\bчатгпт', '\bchat ?gpt\b', '\bgpt\b', '\bии\b', '\bискусственн', '\bассистент', '\b(ai|bot)\b', '\bclaude\b']
+force = true

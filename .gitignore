@@ -1,0 +1,28 @@
+# --- secrets: NEVER commit these ---
+.env
+.env.*
+!.env.example
+secrets/
+*.session
+*.session-journal
+
+# private persona files (real messages / personal context)
+persona/context.md
+persona/examples.md
+
+# runtime data
+data/
+*.db
+*.sqlite3
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

@@ -1,0 +1,11 @@
+.env
+.env.*
+secrets/
+data/
+*.session
+.venv/
+.git/
+**/__pycache__/
+.pytest_cache/
+persona/context.md
+persona/examples.md
