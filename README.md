@@ -126,11 +126,16 @@ docker compose up -d
 → обсуждаешь → «напиши ответ в моём стиле» → правишь → «отправь».
 
 **Настройка:**
-1. В `.env`:
+1. Придумай пароль для входа (12+ символов) и получи его хеш:
+   ```bash
+   docker compose run --rm ghostwriter hash-password
+   ```
+   В `.env`:
    ```
    MCP_ENABLED=true
-   MCP_TOKEN=<openssl rand -hex 24>
-   MCP_ALLOW_SEND=true          # если нужна отправка из Claude
+   MCP_AUTH=oauth
+   MCP_PASSWORD_HASH=scrypt:...      # из команды выше
+   MCP_ALLOW_SEND=true               # если нужна отправка из Claude
    MCP_DOMAIN=203-0-113-7.sslip.io   # IP сервера через дефисы + .sslip.io, или свой домен
    ```
    `ANTHROPIC_API_KEY` и `CONTROL_BOT_TOKEN` можно оставить пустыми: без ключа нет только
@@ -141,13 +146,26 @@ docker compose up -d
    docker compose --profile https up -d --build
    curl https://$MCP_DOMAIN/health        # должно ответить ok
    ```
-3. На claude.ai: **Settings → Connectors → Add custom connector**, адрес
-   `https://<MCP_DOMAIN>/<MCP_TOKEN>/mcp`. После этого коннектор доступен и в мобильном приложении.
-   Для Claude Code: `claude mcp add --transport http telegram https://<MCP_DOMAIN>/<MCP_TOKEN>/mcp`.
+3. На claude.ai: **Settings → Connectors → Add custom connector**, адрес `https://<MCP_DOMAIN>/mcp`.
+   Откроется страница входа на твоём сервере — введи пароль. После этого коннектор доступен и в
+   мобильном приложении. Для Claude Code: `claude mcp add --transport http telegram https://<MCP_DOMAIN>/mcp`,
+   затем `/mcp` → войти.
 
-**Безопасность:** адрес коннектора = доступ к твоему Telegram. Не публикуй его, не делай скриншотов.
-Если утёк — смени `MCP_TOKEN` (`docker compose up -d --force-recreate`) и переподключи коннектор.
-Ответы инструментов содержат переписку целиком — она попадает в чат с Claude и в его лимиты.
+**Как устроен вход (OAuth):** Claude регистрируется на сервере как клиент, ты один раз вводишь пароль,
+Claude получает токен доступа на 1 час и токен обновления на 30 дней (меняется при каждом обновлении).
+Токены хранятся в базе только в виде хешей. Принимаются только клиенты, возвращающие на
+claude.ai / claude.com или localhost (Claude Code, Desktop). После 5 неверных паролей вход
+блокируется на 15 минут.
+
+- Кто подключён: `docker compose run --rm ghostwriter mcp-sessions`
+- Выкинуть всех (придётся войти заново): `docker compose run --rm ghostwriter mcp-sessions --revoke-all`
+- Сменить пароль: новый `hash-password` → `.env` → `docker compose up -d --force-recreate` (уже
+  выданные токены продолжают работать — отзови их командой выше).
+
+Запасной режим без OAuth: `MCP_AUTH=token` и `MCP_TOKEN=<openssl rand -hex 24>`, адрес коннектора
+`https://<MCP_DOMAIN>/<MCP_TOKEN>/mcp` (секрет в адресе — не публикуй его).
+
+Ответы инструментов содержат переписку — она попадает в чат с Claude и расходует лимиты подписки.
 
 ## Расход токенов
 

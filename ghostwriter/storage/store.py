@@ -244,6 +244,18 @@ class Store:
             row = await s.get(KeyValue, key)
             return row.value if row else None
 
+    async def kv_delete(self, key: str) -> None:
+        async with self._session() as s:
+            row = await s.get(KeyValue, key)
+            if row is not None:
+                await s.delete(row)
+                await s.commit()
+
+    async def kv_items(self, prefix: str) -> list[tuple[str, str]]:
+        async with self._session() as s:
+            rows = (await s.scalars(select(KeyValue).where(KeyValue.key.startswith(prefix)))).all()
+        return [(r.key, r.value) for r in rows]
+
     async def kv_set(self, key: str, value: str) -> None:
         async with self._session() as s:
             row = await s.get(KeyValue, key)

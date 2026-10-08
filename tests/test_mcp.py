@@ -53,7 +53,7 @@ async def setup(store, persona):
     tg.store = store
 
     def build(**overrides):
-        base = dict(control_bot_token="", anthropic_api_key="", mcp_enabled=True, mcp_token=TOKEN)
+        base = dict(control_bot_token="", anthropic_api_key="", mcp_enabled=True, mcp_auth="token", mcp_token=TOKEN)
         settings = make_settings(**{**base, **overrides})
         core = Ghostwriter(settings, store, persona, DisabledLLM(), {"telegram": tg}, chats=tg)
         return core, settings

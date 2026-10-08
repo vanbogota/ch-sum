@@ -90,6 +90,40 @@ async def cmd_export_examples(limit: int, out: str | None) -> None:
     print(f"Wrote {len(msgs)} examples to {path}")
 
 
+def cmd_hash_password() -> None:
+    import getpass
+
+    from .oauth import hash_password
+
+    pw = getpass.getpass("Пароль для входа в коннектор (12+ символов): ")
+    if len(pw) < 12:
+        sys.exit("Слишком короткий пароль.")
+    if getpass.getpass("Ещё раз: ") != pw:
+        sys.exit("Пароли не совпали.")
+    print("\nДобавь в .env:\nMCP_PASSWORD_HASH=" + hash_password(pw))
+
+
+async def cmd_mcp_sessions(revoke: bool) -> None:
+    from datetime import datetime
+
+    from .oauth import OwnerOAuthProvider
+    from .storage import Store
+
+    s = get_settings()
+    store = Store(s.database_url)
+    await store.init()
+    provider = OwnerOAuthProvider(store=store, password_hash="", issuer_url="http://localhost")
+    if revoke:
+        n = await provider.revoke_all()
+        print(f"Отозвано сеансов: {n}. Подключённым клиентам придётся войти заново.")
+    else:
+        rows = await provider.sessions()
+        for r in rows:
+            print(f"- {r['client']}: до {datetime.fromtimestamp(float(r['expires_at'])):%Y-%m-%d %H:%M}")  # type: ignore[arg-type]
+        print(f"Всего: {len(rows)}")
+    await store.close()
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="ghostwriter", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -103,6 +137,9 @@ def main() -> None:
     e = sub.add_parser("export-examples", help="write your real messages to persona/examples.md")
     e.add_argument("--limit", type=int, default=40)
     e.add_argument("--out")
+    sub.add_parser("hash-password", help="make MCP_PASSWORD_HASH for the connector login")
+    ms = sub.add_parser("mcp-sessions", help="list connected MCP clients (OAuth)")
+    ms.add_argument("--revoke-all", action="store_true", help="log all of them out")
     args = p.parse_args()
 
     if args.cmd == "run":
@@ -120,6 +157,10 @@ def main() -> None:
         asyncio.run(cmd_chats(args.limit))
     elif args.cmd == "backfill":
         asyncio.run(cmd_backfill(args.limit, args.chat))
+    elif args.cmd == "hash-password":
+        cmd_hash_password()
+    elif args.cmd == "mcp-sessions":
+        asyncio.run(cmd_mcp_sessions(args.revoke_all))
     elif args.cmd == "export-examples":
         asyncio.run(cmd_export_examples(args.limit, args.out))
 

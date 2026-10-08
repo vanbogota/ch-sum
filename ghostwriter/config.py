@@ -94,15 +94,33 @@ class Settings(BaseSettings):
     mcp_enabled: bool = False
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8765
+    mcp_auth: str = "oauth"                 # oauth (password login) | token (secret in the URL)
+    mcp_password_hash: SecretStr | None = None   # `python -m ghostwriter hash-password`
+    mcp_domain: str | None = None           # public name, e.g. 203-0-113-7.sslip.io
+    mcp_public_url: str | None = None       # override, defaults to https://<MCP_DOMAIN>
     mcp_token: SecretStr | None = None
     mcp_allow_send: bool = False
 
-    @field_validator("control_bot_token", "anthropic_api_key", "mcp_token", mode="before")
+    @property
+    def mcp_base_url(self) -> str | None:
+        if self.mcp_public_url:
+            return self.mcp_public_url.rstrip("/")
+        return f"https://{self.mcp_domain}" if self.mcp_domain else None
+
+    @field_validator("mcp_auth")
+    @classmethod
+    def _check_auth(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("oauth", "token"):
+            raise ValueError("MCP_AUTH must be 'oauth' or 'token'")
+        return v
+
+    @field_validator("control_bot_token", "anthropic_api_key", "mcp_token", "mcp_password_hash", mode="before")
     @classmethod
     def _empty_secret_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
-    @field_validator("anthropic_base_url", "tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
+    @field_validator("mcp_domain", "mcp_public_url", "anthropic_base_url", "tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
     @classmethod
     def _empty_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
@@ -130,8 +148,14 @@ class Settings(BaseSettings):
                 missing.append("OWNER_TG_ID")
             if not self.llm_enabled and not self.mcp_enabled:
                 missing.append("ANTHROPIC_API_KEY")
-        if self.mcp_enabled and (self.mcp_token is None or len(self.mcp_token.get_secret_value()) < 24):
-            missing.append("MCP_TOKEN (24+ characters, e.g. `openssl rand -hex 24`)")
+        if self.mcp_enabled and self.mcp_auth == "token":
+            if self.mcp_token is None or len(self.mcp_token.get_secret_value()) < 24:
+                missing.append("MCP_TOKEN (24+ characters, e.g. `openssl rand -hex 24`)")
+        if self.mcp_enabled and self.mcp_auth == "oauth":
+            if self.mcp_password_hash is None:
+                missing.append("MCP_PASSWORD_HASH (`python -m ghostwriter hash-password`)")
+            if not self.mcp_base_url:
+                missing.append("MCP_DOMAIN")
         return missing
 
     @field_validator("active_hours")

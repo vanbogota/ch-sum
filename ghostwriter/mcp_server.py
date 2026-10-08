@@ -1,8 +1,9 @@
 """MCP server: lets Claude (claude.ai, the mobile app, Claude Desktop, Claude Code) read your Telegram chats
 and send messages as you. Claude does the thinking under your subscription; no Anthropic API key needed.
 
-Exposed over Streamable HTTP. Access is protected by a secret token, either in the URL path
-(`https://host/<token>/mcp`, for claude.ai custom connectors) or as `Authorization: Bearer <token>`.
+Exposed over Streamable HTTP at /mcp. Access (MCP_AUTH):
+- oauth (default): Claude registers itself and the owner logs in with a password (see oauth.py);
+- token: a secret token in the URL path (`https://host/<token>/mcp`) or as `Authorization: Bearer <token>`.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from collections.abc import Awaitable, Callable, MutableMapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -21,6 +23,7 @@ from .chats import ChatRef
 from .config import Settings
 from .core import ActionError, Ghostwriter
 from .llm.prompts import clip, format_history, format_style_samples
+from .oauth import SCOPE, OwnerOAuthProvider
 from .storage import Message
 
 log = logging.getLogger(__name__)
@@ -45,9 +48,50 @@ class TelegramTools(Protocol):
     async def search(self, chat_id: int, text: str, limit: int = 30) -> list[Message]: ...
 
 
-def build_server(core: Ghostwriter, tg: TelegramTools, settings: Settings) -> MCPServer:
+def make_oauth(core: Ghostwriter, settings: Settings) -> OwnerOAuthProvider:
+    base = settings.mcp_base_url
+    if not base or settings.mcp_password_hash is None:
+        raise ValueError("OAuth needs MCP_DOMAIN (or MCP_PUBLIC_URL) and MCP_PASSWORD_HASH.")
+    return OwnerOAuthProvider(
+        store=core.store,
+        password_hash=settings.mcp_password_hash.get_secret_value(),
+        issuer_url=base,
+        allow_send=settings.mcp_allow_send,
+    )
+
+
+def build_server(
+    core: Ghostwriter, tg: TelegramTools, settings: Settings, oauth: OwnerOAuthProvider | None = None
+) -> MCPServer:
     tz, owner = settings.tz, settings.owner_name
-    mcp = MCPServer("ghostwriter-telegram", instructions=INSTRUCTIONS)
+    if oauth is None:
+        mcp = MCPServer("ghostwriter-telegram", instructions=INSTRUCTIONS)
+    else:
+        base = oauth.issuer_url.rstrip("/")
+        mcp = MCPServer(
+            "ghostwriter-telegram",
+            instructions=INSTRUCTIONS,
+            auth_server_provider=oauth,
+            auth=AuthSettings(
+                issuer_url=base,
+                resource_server_url=f"{base}/mcp",
+                client_registration_options=ClientRegistrationOptions(
+                    enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]
+                ),
+                revocation_options=RevocationOptions(enabled=True),
+                validate_token_resource=False,  # single owner; tokens are opaque and stored server-side
+            ),
+        )
+
+        @mcp.custom_route("/login", methods=["GET", "POST"])
+        async def login(request):  # type: ignore[no-untyped-def]
+            return await oauth.login_page(request)
+
+        @mcp.custom_route("/health", methods=["GET"])
+        async def health(request):  # type: ignore[no-untyped-def]
+            from starlette.responses import PlainTextResponse
+
+            return PlainTextResponse("ok")
 
     async def find(query: str | None, kinds: set[str] | None, limit: int) -> list[ChatRef]:
         try:
@@ -231,12 +275,14 @@ async def _plain(send: Any, status: int, body: bytes) -> None:
 
 
 def build_http_app(mcp: MCPServer, settings: Settings) -> ASGIApp:
+    # Host/Origin checks guard localhost servers against browsers; this one sits behind a reverse proxy
+    # under a public name and is protected by OAuth or the token instead.
+    security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if settings.mcp_auth == "oauth":
+        return mcp.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, transport_security=security)
     token = settings.mcp_token.get_secret_value() if settings.mcp_token else ""
     if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError(f"MCP_TOKEN must be at least {MIN_TOKEN_LENGTH} characters (try `openssl rand -hex 24`).")
-    # Host/Origin checks guard localhost servers against browsers; this one sits behind a reverse proxy
-    # under a public name and is protected by the token instead.
-    security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
     app = mcp.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, transport_security=security)
     return TokenGate(app, token)
 
@@ -244,13 +290,17 @@ def build_http_app(mcp: MCPServer, settings: Settings) -> ASGIApp:
 async def serve(core: Ghostwriter, tg: TelegramTools, settings: Settings) -> None:
     import uvicorn
 
-    app = build_http_app(build_server(core, tg, settings), settings)
-    config = uvicorn.Config(app, host=settings.mcp_host, port=settings.mcp_port, log_level="warning", lifespan="on")
+    oauth = make_oauth(core, settings) if settings.mcp_auth == "oauth" else None
+    app = build_http_app(build_server(core, tg, settings, oauth), settings)
+    config = uvicorn.Config(
+        app, host=settings.mcp_host, port=settings.mcp_port, log_level="warning", lifespan="on",
+        proxy_headers=True, forwarded_allow_ips="*",
+    )
     log.info(
-        "MCP server on %s:%s (send %s)", settings.mcp_host, settings.mcp_port,
+        "MCP server on %s:%s (auth %s, send %s)", settings.mcp_host, settings.mcp_port, settings.mcp_auth,
         "enabled" if settings.mcp_allow_send else "disabled",
     )
     await uvicorn.Server(config).serve()
 
 
-__all__ = ["TokenGate", "build_http_app", "build_server", "serve"]
+__all__ = ["TokenGate", "build_http_app", "build_server", "make_oauth", "serve"]
