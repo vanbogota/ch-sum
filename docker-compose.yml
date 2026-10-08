@@ -6,6 +6,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./secrets:/app/secrets
-      - ./persona:/app/persona:ro
+      - ./persona:/app/persona   # writable: export-examples writes persona/examples.md
     # First run (interactive Telegram login):
     #   docker compose run --rm ghostwriter login
