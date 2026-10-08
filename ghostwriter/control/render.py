@@ -81,11 +81,15 @@ def render_source(messages: Sequence[Message], tz: ZoneInfo, limit: int = SOURCE
     return _clip("\n".join(lines), limit)
 
 
-def render_card(draft: Draft, tz: ZoneInfo, contact_name: str) -> str:
+def render_card(draft: Draft, tz: ZoneInfo, contact_name: str, where: str | None = None) -> str:
+    """`where` names the target chat when it is not the contact's private chat (e.g. a group)."""
     src = draft.source
     icon = "✈️" if draft.channel == "telegram" else "📧"
     head = f"{icon} <b>Черновик #{draft.id}</b> · {STATUS_LABELS.get(DraftStatus(draft.status), draft.status)}"
-    parts = [head, f"<b>{escape(contact_name)}:</b>\n{render_source([src], tz)}" if src else ""]
+    if where:
+        head += f"\nКуда: <b>{escape(where)}</b>"
+    author = (src.author_name if src and src.author_name and src.author_name != "?" else contact_name)
+    parts = [head, f"<b>{escape(author)}:</b>\n{render_source([src], tz)}" if src else ""]
     text = draft.outgoing_text
     if text:
         label = "Твой текст" if draft.edited else "Ответ"
@@ -114,16 +118,19 @@ HELP = """<b>Что я умею</b>
 
 Пиши обычным текстом, например:
 • <i>саммари последних сообщений от Владимира</i>
-• <i>саммари за 3 дня</i>
+• <i>саммари группы Работа за день</i>
 • <i>ответь в моем стиле</i> / <i>ответь в моем стиле, вежливо откажись</i>
 • <i>о чём мы договорились про поездку?</i>
+• <i>переключись на чат с Петей</i>
 
 Команды:
-/summary [N] [24h|3d] [from Имя] [тема] — саммари
-/reply [указания] — черновик ответа в твоём стиле
-/ask вопрос — вопрос по переписке
+/contact [имя] — выбрать собеседника (на его сообщения я готовлю черновики)
+/chat [название] — выбрать чат или группу для саммари и вопросов
+/summary [N] [24h|3d] [from Имя] [тема] — саммари текущего чата
+/reply [указания] — черновик ответа в текущем чате
+/ask вопрос — вопрос по текущему чату
 /pending — черновики, ждущие решения
-/sync [N] — подтянуть историю Telegram
+/sync [N] — подтянуть историю текущего чата
 /status — состояние
 /cancel — отменить редактирование
 

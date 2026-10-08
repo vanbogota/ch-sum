@@ -9,6 +9,8 @@ secrets/
 # private persona files (real messages / personal context)
 persona/context.md
 persona/examples.md
+persona/contacts/*
+!persona/contacts/example.md
 
 # runtime data
 data/

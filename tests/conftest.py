@@ -38,13 +38,16 @@ class FakeLLM:
         self.json_responses: list[dict[str, Any]] = []
         self.text_responses: list[str] = []
         self.calls: list[tuple[str, str, str]] = []
+        self.purposes: list[str] = []
 
-    async def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 0) -> dict[str, Any]:
+    async def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 0, purpose: str = "") -> dict[str, Any]:
         self.calls.append(("json", system, user))
+        self.purposes.append(purpose)
         return self.json_responses.pop(0)
 
-    async def text(self, system: str, user: str, max_tokens: int = 0) -> str:
+    async def text(self, system: str, user: str, max_tokens: int = 0, purpose: str = "") -> str:
         self.calls.append(("text", system, user))
+        self.purposes.append(purpose)
         return self.text_responses.pop(0)
 
 
@@ -53,17 +56,46 @@ class FakeSender:
         self.store = store
         self.channel = channel
         self.sent: list[str] = []
+        self.sent_to: list[str | None] = []
         self.fail = False
 
     async def send(self, text: str, reply_to: Message | None) -> Message:
         if self.fail:
             raise RuntimeError("network down")
         self.sent.append(text)
+        self.sent_to.append(reply_to.chat_id if reply_to else None)
         msg, _ = await self.store.add_message(
-            channel=self.channel, direction=Direction.OUT, chat_id="200", text=text,
+            channel=self.channel, direction=Direction.OUT, chat_id=reply_to.chat_id if reply_to else "200", text=text,
             author_name="Ivan", external_id=f"sent-{len(self.sent)}", status="sent",
         )
         return msg
+
+
+class FakeChats:
+    """Stands in for the Telegram gateway's chat functions."""
+
+    def __init__(self, refs, history=None) -> None:
+        self.refs = {r.chat_id: r for r in refs}
+        self.history = history or {}  # chat_id -> list of add_message kwargs, "imported" on backfill
+        self.store: Store | None = None
+        self.watched: set[int] = set()
+        self.backfilled: list[int] = []
+
+    async def backfill(self, chat_id, limit, since=None):
+        self.backfilled.append(chat_id)
+        out = []
+        for kw in self.history.get(chat_id, []):
+            m, created = await self.store.add_message(**kw)
+            if created:
+                out.append(m)
+        return out
+
+    async def search_chats(self, query, kinds=None, limit=10):
+        q = (query or "").casefold()
+        return [r for r in self.refs.values() if (not kinds or r.kind in kinds) and q in r.title.casefold()][:limit]
+
+    async def chat_ref(self, chat):
+        return self.refs[int(chat)]
 
 
 class FakeNotifier:

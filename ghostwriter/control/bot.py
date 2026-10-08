@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Sequence
 from datetime import datetime
-from collections.abc import Awaitable, Callable, Sequence
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -16,6 +16,7 @@ from aiogram.types import Message as TgMessage
 from aiogram.utils.chat_action import ChatActionSender
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from ..chats import ChatRef
 from ..config import Settings
 from ..core import ActionError, Ghostwriter, SummaryRequest
 from ..llm import LLMError
@@ -28,6 +29,19 @@ log = logging.getLogger(__name__)
 class DraftCb(CallbackData, prefix="d"):
     action: str  # send | edit | skip | regen | now
     draft_id: int
+
+
+class SelectCb(CallbackData, prefix="s"):
+    target: str  # contact | chat
+    chat_id: int
+
+
+def chooser(refs: Sequence[ChatRef], target: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for ref in refs:
+        b.button(text=ref.label[:60], callback_data=SelectCb(target=target, chat_id=ref.chat_id))
+    b.adjust(1)
+    return b.as_markup()
 
 
 def keyboard(draft: Draft) -> InlineKeyboardMarkup | None:
@@ -55,12 +69,12 @@ def keyboard(draft: Draft) -> InlineKeyboardMarkup | None:
 
 
 class ControlBot:
-    def __init__(self, settings: Settings, core: Ghostwriter, sync: Callable[[int], Awaitable[int]] | None = None) -> None:
+    def __init__(self, settings: Settings, core: Ghostwriter) -> None:
         self.settings = settings
         self.core = core
         self.owner = settings.owner_tg_id
         self.tz = settings.tz
-        self.sync = sync
+        self._choices: dict[int, ChatRef] = {}  # chats offered in the last chooser
         self.bot = Bot(settings.control_bot_token.get_secret_value(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         self.dp = Dispatcher()
         self.awaiting_edit: int | None = None
@@ -72,10 +86,21 @@ class ControlBot:
         for chunk in split_text(text):
             await self.bot.send_message(self.owner, chunk, parse_mode=None)
 
+    async def _where(self, draft: Draft) -> str | None:
+        """Label of the target chat when the reply goes somewhere other than the contact's chat."""
+        src = draft.source
+        if src is None or draft.channel != "telegram" or src.chat_id == self.core.contact_chat_id("telegram"):
+            return None
+        try:
+            return (await self.core.chat_by_id(int(src.chat_id))).label
+        except Exception:
+            return f"чат {src.chat_id}"
+
+    async def _card(self, draft: Draft) -> str:
+        return render_card(draft, self.tz, self.settings.contact_name, await self._where(draft))
+
     async def draft_card(self, draft: Draft) -> None:
-        msg = await self.bot.send_message(
-            self.owner, render_card(draft, self.tz, self.settings.contact_name), reply_markup=keyboard(draft)
-        )
+        msg = await self.bot.send_message(self.owner, await self._card(draft), reply_markup=keyboard(draft))
         await self.core.store.update_draft(draft.id, control_message_id=msg.message_id)
 
     async def escalation(self, draft: Draft, messages: Sequence[Message]) -> None:
@@ -92,7 +117,7 @@ class ControlBot:
             return
         try:
             await self.bot.edit_message_text(
-                render_card(fresh, self.tz, self.settings.contact_name),
+                await self._card(fresh),
                 chat_id=self.owner,
                 message_id=fresh.control_message_id,
                 reply_markup=keyboard(fresh),
@@ -115,10 +140,13 @@ class ControlBot:
         r.message.register(self.cmd_ask, Command("ask"))
         r.message.register(self.cmd_pending, Command("pending"))
         r.message.register(self.cmd_sync, Command("sync"))
+        r.message.register(self.cmd_contact, Command("contact"))
+        r.message.register(self.cmd_chat, Command("chat"))
         r.message.register(self.cmd_status, Command("status"))
         r.message.register(self.cmd_cancel, Command("cancel"))
         r.message.register(self.on_text, F.text)
         r.callback_query.register(self.on_button, DraftCb.filter())
+        r.callback_query.register(self.on_select, SelectCb.filter())
         return r
 
     async def _reply_long(self, m: TgMessage, text: str) -> None:
@@ -166,22 +194,83 @@ class ControlBot:
             await self.draft_card(d)
 
     async def cmd_sync(self, m: TgMessage, command: CommandObject) -> None:
-        if self.sync is None:
-            await m.answer("Синхронизация недоступна.")
+        ref = self.core.current
+        if ref is None:
+            await m.answer("Сначала выбери чат: /chat")
             return
         limit = int(command.args) if command.args and command.args.strip().isdigit() else 500
 
         async def go() -> str:
-            n = await self.sync(limit)  # type: ignore[misc]
-            return f"Готово: добавлено {n} сообщений."
+            n = await self.core.sync(ref, limit)
+            return f"{ref.label}: добавлено {n} сообщений."
 
         await self._run(m, go())
+
+    # ------------------------------------------------------- chat selection
+
+    async def _offer(self, m: TgMessage, refs: Sequence[ChatRef], target: str, text: str) -> None:
+        self._choices.update({r.chat_id: r for r in refs})
+        await m.answer(text, reply_markup=chooser(refs, target), parse_mode=None)
+
+    async def _pick(self, m: TgMessage, target: str, query: str | None) -> None:
+        kinds = {"user"} if target == "contact" else None
+        try:
+            refs = await self.core.find_chats(query, kinds)
+        except ActionError as exc:
+            await m.answer(f"⚠️ {exc}", parse_mode=None)
+            return
+        if not refs:
+            await m.answer(f"Не нашёл чат «{query}». Попробуй часть имени или @username.", parse_mode=None)
+            return
+        exact = [r for r in refs if query and r.title.casefold() == query.strip().casefold()]
+        if query and (len(refs) == 1 or len(exact) == 1):
+            await self._run(m, self._select(target, (exact or refs)[0]))
+            return
+        what = "собеседника" if target == "contact" else "чат для саммари и вопросов"
+        await self._offer(m, refs, target, f"Выбери {what}:")
+
+    async def _select(self, target: str, ref: ChatRef) -> str:
+        if target == "contact":
+            n = await self.core.set_contact(ref)
+            return (
+                f"✅ Собеседник: {ref.label}. На его сообщения буду готовить черновики; "
+                f"саммари и вопросы тоже по этому чату. Подтянул {n} новых сообщений."
+            )
+        n = await self.core.set_current(ref)
+        extra = ""
+        if self.core.contact and self.core.contact.chat_id != ref.chat_id:
+            extra = f" Черновики на сообщения {self.core.contact.title} приходят как раньше."
+        return f"✅ Текущий чат: {ref.label}. Подтянул {n} новых сообщений.{extra}"
+
+    async def cmd_contact(self, m: TgMessage, command: CommandObject) -> None:
+        await self._pick(m, "contact", command.args)
+
+    async def cmd_chat(self, m: TgMessage, command: CommandObject) -> None:
+        await self._pick(m, "chat", command.args)
+
+    async def on_select(self, q: CallbackQuery, callback_data: SelectCb) -> None:
+        await q.answer("Переключаю…")
+        try:
+            ref = self._choices.get(callback_data.chat_id) or await self.core.chat_by_id(callback_data.chat_id)
+            text = await self._select(callback_data.target, ref)
+        except ActionError as exc:
+            text = f"⚠️ {exc}"
+        if q.message is not None:
+            try:
+                await q.message.edit_text(text, parse_mode=None)  # type: ignore[union-attr]
+                return
+            except TelegramBadRequest:
+                pass
+        await self.info(text)
 
     async def cmd_status(self, m: TgMessage) -> None:
         counts = await self.core.store.count_messages()
         drafts = await self.core.store.draft_counts()
         s = self.settings
+        contact, current = self.core.contact, self.core.current
         lines = [
+            f"Собеседник: {contact.label if contact else 'не выбран (/contact)'}",
+            f"Текущий чат: {current.label if current else 'не выбран (/chat)'}",
             f"Модель: {s.anthropic_model}",
             f"Каналы: {', '.join(self.core.senders)}",
             "Сообщений: " + (", ".join(f"{k}: {v}" for k, v in counts.items()) or "0"),
@@ -212,21 +301,46 @@ class ControlBot:
         if text.startswith("/"):
             await m.answer("Не знаю такой команды. /help")
             return
-        await self._run(m, self._natural(text))
+        await self._run(m, self._natural(m, text))
 
-    async def _natural(self, text: str) -> str | None:
+    async def _resolve(self, m: TgMessage, name: str, target: str) -> ChatRef | None:
+        """Find the chat named in a request. With several candidates, offer buttons and return None."""
+        refs = await self.core.find_chats(name, {"user"} if target == "contact" else None, limit=6)
+        if not refs:
+            raise ActionError(f"Не нашёл чат «{name}».")
+        exact = [r for r in refs if r.title.casefold() == name.strip().casefold()]
+        if len(refs) == 1 or len(exact) == 1:
+            return (exact or refs)[0]
+        await self._offer(m, refs, target, f"Нашёл несколько чатов «{name}». Выбери нужный и повтори запрос:")
+        return None
+
+    async def _natural(self, m: TgMessage, text: str) -> str | None:
         """Free-form request: let Claude pick the action, then run it."""
         intent = await self.core.route(text)
         log.info("routed request to %s", intent.action)
+        if intent.action in ("set_contact", "set_chat"):
+            target = "contact" if intent.action == "set_contact" else "chat"
+            if not intent.chat:
+                await self._pick(m, target, None)
+                return None
+            ref = await self._resolve(m, intent.chat, target)
+            return await self._select(target, ref) if ref else None
+        chat = None
+        if intent.chat:
+            chat = await self._resolve(m, intent.chat, "chat")
+            if chat is None:
+                return None
         if intent.action == "summary":
             return await self.core.summarize(
-                SummaryRequest(intent.author, intent.limit, intent.since_hours, intent.instructions)
+                SummaryRequest(intent.author, intent.limit, intent.since_hours, intent.instructions), chat=chat
             )
         if intent.action == "reply":
-            await self.core.request_reply(intent.instructions)
+            await self.core.request_reply(intent.instructions, chat=chat)
             return None
         if intent.action == "question":
-            return await self.core.ask(intent.instructions or text, intent.limit, intent.author, intent.since_hours)
+            return await self.core.ask(
+                intent.instructions or text, intent.limit, intent.author, intent.since_hours, chat=chat
+            )
         return "Не понял запрос. Попробуй «саммари за сутки», «ответь в моем стиле» или /help."
 
     async def on_button(self, q: CallbackQuery, callback_data: DraftCb) -> None:

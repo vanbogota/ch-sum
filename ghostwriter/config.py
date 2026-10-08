@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     owner_tg_id: int = 0
 
     # Contact
-    vladimir_tg_id: int = 0  # required for `run`; `login`/`chats` work without it
+    vladimir_tg_id: int = 0  # default contact; can be changed in the bot with /contact
     tg_chat: str | None = None
     owner_name: str = "Ivan"
     contact_name: str = "Vladimir"
@@ -97,7 +97,8 @@ class Settings(BaseSettings):
         return 0 if isinstance(v, str) and not v.strip() else v
 
     def missing_for_run(self) -> list[str]:
-        missing = [name for name, value in (("OWNER_TG_ID", self.owner_tg_id), ("VLADIMIR_TG_ID", self.vladimir_tg_id)) if not value]
+        # VLADIMIR_TG_ID is optional: the contact can be chosen in the bot with /contact.
+        missing = ["OWNER_TG_ID"] if not self.owner_tg_id else []
         if not self.anthropic_api_key:
             missing.append("ANTHROPIC_API_KEY")
         return missing

@@ -28,13 +28,17 @@ class LLM:
         client: anthropic.AsyncAnthropic | None = None,
     ) -> None:
         self.model = model
+        # Through a gateway, label each request with its purpose (LiteLLM turns tags into Langfuse trace tags).
+        self.tag_requests = bool(base_url)
         # An empty ANTHROPIC_BASE_URL in the environment would override the SDK default with "".
         if not os.environ.get("ANTHROPIC_BASE_URL", "x").strip():
             os.environ.pop("ANTHROPIC_BASE_URL")
         # With api_key/base_url=None the SDK resolves them from the environment / its defaults.
         self._client = client or anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
 
-    async def _create(self, *, system: str, user: str, max_tokens: int, **extra: Any) -> str:
+    async def _create(self, *, system: str, user: str, max_tokens: int, purpose: str, **extra: Any) -> str:
+        if self.tag_requests:
+            extra["extra_headers"] = {"x-litellm-tags": f"ghostwriter,{purpose}"}
         try:
             response = await self._client.messages.create(
                 model=self.model,
@@ -62,15 +66,18 @@ class LLM:
             raise LLMError("empty response from Claude")
         return text
 
-    async def text(self, system: str, user: str, max_tokens: int = 4000) -> str:
-        return await self._create(system=system, user=user, max_tokens=max_tokens)
+    async def text(self, system: str, user: str, max_tokens: int = 4000, purpose: str = "text") -> str:
+        return await self._create(system=system, user=user, max_tokens=max_tokens, purpose=purpose)
 
-    async def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 2000) -> dict[str, Any]:
+    async def json(
+        self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 2000, purpose: str = "json"
+    ) -> dict[str, Any]:
         """Structured output constrained to a JSON schema."""
         raw = await self._create(
             system=system,
             user=user,
             max_tokens=max_tokens,
+            purpose=purpose,
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
         try:

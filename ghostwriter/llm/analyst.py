@@ -14,9 +14,16 @@ ROUTE_SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["summary", "reply", "question", "help"],
-            "description": "summary: summarise messages; reply: draft a reply to the contact; "
-            "question: answer a question about the chat; help: unclear request.",
+            "enum": ["summary", "reply", "question", "set_contact", "set_chat", "help"],
+            "description": "summary: summarise messages; reply: draft a reply; question: answer a question "
+            "about a chat; set_contact: change the person whose messages get auto-drafted replies; "
+            "set_chat: switch the current chat/group for summaries and questions; help: unclear request.",
+        },
+        "chat": {
+            "type": ["string", "null"],
+            "description": "A chat, group or person named as the TARGET of the request (e.g. 'в группе Работа' -> "
+            "'Работа', 'чат с Петей' -> 'Петя'), in nominative case. Null if no chat is named. "
+            "Not the same as author: 'саммари от Володи' has author, no chat.",
         },
         "author": {
             "type": ["string", "null"],
@@ -29,7 +36,7 @@ ROUTE_SCHEMA = {
             "description": "For reply: what the reply should say or how. For question/summary: the question or focus.",
         },
     },
-    "required": ["action", "author", "limit", "since_hours", "instructions"],
+    "required": ["action", "chat", "author", "limit", "since_hours", "instructions"],
     "additionalProperties": False,
 }
 
@@ -37,6 +44,7 @@ ROUTE_SCHEMA = {
 @dataclass(frozen=True)
 class Intent:
     action: str
+    chat: str | None = None
     author: str | None = None
     limit: int | None = None
     since_hours: float | None = None
@@ -50,20 +58,21 @@ class Analyst:
         self.owner_name = owner_name
         self.contact_name = contact_name
 
-    async def route(self, command: str, participants: Sequence[str]) -> Intent:
+    async def route(self, command: str, participants: Sequence[str], current_chat: str = "") -> Intent:
         system = (
             f"You turn {self.owner_name}'s requests to his personal assistant into a structured command. "
-            f"The assistant watches {self.owner_name}'s chat with {self.contact_name} and can summarise it, "
-            f"answer questions about it, or draft a reply in {self.owner_name}'s style. "
+            f"The assistant reads {self.owner_name}'s Telegram chats (current chat: {current_chat or 'none'}) "
+            f"and can summarise them, answer questions about them, or draft a reply in {self.owner_name}'s style. "
             "Requests may be in Russian or English. "
             f"'me'/'мои'/'я' refers to {self.owner_name}. Known chat participants: {', '.join(participants) or 'unknown'}; "
-            "map names and their inflected forms (e.g. 'от Володи' -> Vladimir) to one of them. JSON only."
+            "map author names and their inflected forms (e.g. 'от Володи' -> Vladimir) to one of them. JSON only."
         )
-        r = await self.llm.json(system, command, ROUTE_SCHEMA, max_tokens=800)
+        r = await self.llm.json(system, command, ROUTE_SCHEMA, max_tokens=800, purpose="route")
         limit = r.get("limit")
         since = r.get("since_hours")
         return Intent(
             action=r.get("action", "help"),
+            chat=r.get("chat") or None,
             author=r.get("author") or None,
             limit=int(limit) if isinstance(limit, (int, float)) and limit > 0 else None,
             since_hours=float(since) if isinstance(since, (int, float)) and since > 0 else None,
@@ -72,24 +81,28 @@ class Analyst:
 
     def _system(self) -> str:
         return (
-            f"You are {self.owner_name}'s private assistant. You read his conversation with {self.contact_name} "
-            "(Telegram and email) and report to him. Be concise and concrete, cite dates when useful, and never "
+            f"You are {self.owner_name}'s private assistant. You read his chats and report to him. Be concise and concrete, cite dates when useful, and never "
             "invent anything that is not in the messages. Answer in the language of his request. "
             "Use plain text with short bullet points (the output is shown in Telegram)."
         )
 
-    async def summarize(self, messages: Sequence[Message], focus: str | None = None, author: str | None = None) -> str:
+    async def summarize(
+        self, messages: Sequence[Message], focus: str | None = None, author: str | None = None, chat: str | None = None
+    ) -> str:
         what = f"messages from {author}" if author else "the conversation"
+        if chat:
+            what += f" in the chat «{chat}»"
         ask = f"Summarise {what} below: main topics, questions or requests waiting for {self.owner_name}'s answer, "
         ask += "any plans, dates or promises mentioned, and the overall mood."
         if focus:
             ask += f"\nFocus / request: {focus}"
         user = f"{ask}\n\nMessages (oldest first):\n{format_history(messages, self.tz, self.owner_name)}"
-        return await self.llm.text(self._system(), user, max_tokens=3000)
+        return await self.llm.text(self._system(), user, max_tokens=3000, purpose="summary")
 
-    async def answer(self, question: str, messages: Sequence[Message]) -> str:
+    async def answer(self, question: str, messages: Sequence[Message], chat: str | None = None) -> str:
+        where = f" (chat «{chat}»)" if chat else ""
         user = (
-            f"Question: {question}\n\nMessages (oldest first):\n"
+            f"Question: {question}\n\nMessages{where} (oldest first):\n"
             f"{format_history(messages, self.tz, self.owner_name)}"
         )
-        return await self.llm.text(self._system(), user, max_tokens=3000)
+        return await self.llm.text(self._system(), user, max_tokens=3000, purpose="question")

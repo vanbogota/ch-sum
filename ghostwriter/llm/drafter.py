@@ -54,13 +54,17 @@ class Drafter:
         self.owner_name = owner_name
         self.contact_name = contact_name
 
-    def system_prompt(self) -> str:
-        o, c = self.owner_name, self.contact_name
+    def system_prompt(self, contact_name: str | None = None, contact_notes: str = "") -> str:
+        o, c = self.owner_name, contact_name or self.contact_name
         return f"""You are ghostwriting messages that {o} sends to {c}. The reply is sent from {o}'s own account and must read as if {o} typed it himself.
 
 <about_owner>
 {self.persona.context or "(not provided)"}
 </about_owner>
+
+<about_contact>
+{contact_notes or f"(no notes about {c}: don't assume anything about the relationship beyond the conversation)"}
+</about_contact>
 
 <style_examples>
 Real messages {o} wrote. Match their tone, length, punctuation, capitalisation, emoji use, slang and language:
@@ -70,7 +74,7 @@ Real messages {o} wrote. Match their tone, length, punctuation, capitalisation, 
 Rules:
 - Never invent facts about {o}'s life, plans, whereabouts, feelings, other people or commitments. Use only what is in about_owner and the conversation. If a reply needs something you don't know, either keep it vague and friendly without making anything up, or set escalate=true.
 - Never agree to meetings, calls, dates, payments or any other commitment. Never say or hint that you are an AI or an assistant.
-- Reply in the language {c} used in his latest messages.
+- Reply in the language used in the latest messages you are answering.
 - Reply to what is actually new; don't repeat what {o} already said in the history.
 - Output JSON only."""
 
@@ -82,6 +86,8 @@ Rules:
         history: Sequence[Message],
         style_samples: Sequence[Message],
         instructions: str | None = None,
+        contact_name: str | None = None,
+        contact_notes: str = "",
     ) -> DraftResult:
         guidance = CHANNEL_GUIDANCE.get(source.channel, "")
         parts = [
@@ -94,7 +100,7 @@ Rules:
             parts.append(
                 f"{self.owner_name}'s instructions for this reply (follow them; they override the defaults): {instructions}"
             )
-        result = await self.llm.json(self.system_prompt(), "\n\n".join(parts), SCHEMA, max_tokens=3000)
+        result = await self.llm.json(self.system_prompt(contact_name, contact_notes), "\n\n".join(parts), SCHEMA, max_tokens=3000, purpose="draft")
         text = str(result.get("reply", "")).strip()
         escalate = bool(result.get("escalate")) or not text
         return DraftResult(text=text, escalate=escalate, note=str(result.get("note", "")).strip())

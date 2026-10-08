@@ -47,10 +47,10 @@ class EscalationChecker:
         self.owner_name = owner_name
         self.contact_name = contact_name
 
-    def _system(self) -> str:
+    def _system(self, contact_name: str) -> str:
         cats = "\n".join(f"- {c.name}: {c.description}" for c in self.categories) or "- (none configured)"
         return (
-            f"You screen messages that {self.contact_name} sends to {self.owner_name}. An assistant drafts "
+            f"You screen messages that {contact_name} sends to {self.owner_name}. An assistant drafts "
             f"replies on {self.owner_name}'s behalf, but it must NOT reply on its own to anything in these "
             f"categories; those are escalated to {self.owner_name}:\n{cats}\n\n"
             "Judge the NEW messages in the context of the recent conversation. Escalate if any new message "
@@ -59,7 +59,9 @@ class EscalationChecker:
             "escalation. When unsure, escalate. Answer with JSON only."
         )
 
-    async def check(self, new_messages: Sequence[Message], history: Sequence[Message]) -> EscalationDecision:
+    async def check(
+        self, new_messages: Sequence[Message], history: Sequence[Message], contact_name: str | None = None
+    ) -> EscalationDecision:
         text = "\n".join(m.text for m in new_messages)
         hits = keyword_hits(self.categories, text)
         forced = [c for c in hits if c.force]
@@ -73,7 +75,7 @@ class EscalationChecker:
             + "\n".join(format_message(m, self.tz, self.owner_name) for m in new_messages)
             + hint
         )
-        result = await self.llm.json(self._system(), user, SCHEMA, max_tokens=1000)
+        result = await self.llm.json(self._system(contact_name or self.contact_name), user, SCHEMA, max_tokens=1000, purpose="escalation")
         escalate = bool(result.get("escalate"))
         category = result.get("category") or None
         if category == "none":

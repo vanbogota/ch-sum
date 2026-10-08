@@ -23,8 +23,19 @@ async def cmd_login() -> None:
     s = get_settings()
     s.tg_session_path.parent.mkdir(parents=True, exist_ok=True)
     client = TelegramClient(str(s.tg_session_path), s.tg_api_id, s.tg_api_hash.get_secret_value())
-    await client.start()  # prompts for phone, code and 2FA password
+    def ask_phone() -> str:
+        while True:
+            value = input("Your phone number in international format (e.g. +358401234567): ").strip()
+            if ":" in value:
+                print("That looks like a bot token. Log in with YOUR phone number: the assistant works as you.")
+                continue
+            return value
+
+    await client.start(phone=ask_phone)  # then asks for the login code (sent in Telegram) and 2FA password
     me = await client.get_me()
+    if me.bot:
+        await client.log_out()
+        sys.exit("Logged in as a bot: run `login` again with your phone number.")
     print(f"Logged in as {me.first_name} (id {me.id}). Session saved to {s.tg_session_path}")
     await client.disconnect()
 
@@ -41,12 +52,20 @@ async def cmd_chats(limit: int) -> None:
     await store.close()
 
 
-async def cmd_backfill(limit: int) -> None:
+async def cmd_backfill(limit: int, chat: str | None) -> None:
     s = get_settings()
     store, tg = await _telegram(s)
     await tg.start()
-    created = await tg.backfill(limit)
-    print(f"Imported {len(created)} new messages.")
+    target: int | str
+    if chat:
+        target = int(chat) if chat.lstrip("-").isdigit() else chat
+    elif s.vladimir_tg_id:
+        target = s.watched_chat
+    else:
+        sys.exit("Pass --chat <id or @username> (see `chats`) or set VLADIMIR_TG_ID.")
+    ref = await tg.chat_ref(target)
+    created = await tg.backfill(ref.chat_id, limit)
+    print(f"{ref.title}: imported {len(created)} new messages.")
     await tg.stop()
     await store.close()
 
@@ -80,6 +99,7 @@ def main() -> None:
     c.add_argument("--limit", type=int, default=50)
     b = sub.add_parser("backfill", help="import history of the watched chat")
     b.add_argument("--limit", type=int, default=1000)
+    b.add_argument("--chat", help="chat id or @username (default: the .env contact)")
     e = sub.add_parser("export-examples", help="write your real messages to persona/examples.md")
     e.add_argument("--limit", type=int, default=150)
     e.add_argument("--out")
@@ -99,7 +119,7 @@ def main() -> None:
     elif args.cmd == "chats":
         asyncio.run(cmd_chats(args.limit))
     elif args.cmd == "backfill":
-        asyncio.run(cmd_backfill(args.limit))
+        asyncio.run(cmd_backfill(args.limit, args.chat))
     elif args.cmd == "export-examples":
         asyncio.run(cmd_export_examples(args.limit, args.out))
 
