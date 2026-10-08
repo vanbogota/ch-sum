@@ -26,6 +26,7 @@ class Persona:
     context: str
     examples: str
     categories: tuple[EscalationCategory, ...] = field(default_factory=tuple)
+    directory: Path | None = None
 
     @classmethod
     def load(cls, directory: Path) -> Persona:
@@ -33,7 +34,15 @@ class Persona:
             context=_read(directory / "context.md", directory / "context.example.md"),
             examples=_read(directory / "examples.md", directory / "examples.example.md"),
             categories=load_categories(directory / "escalation.toml"),
+            directory=directory,
         )
+
+    def contact_notes(self, chat_id: int | str) -> str:
+        """persona/contacts/<chat id>.md: who this person / group is to the owner. Read on every call."""
+        if self.directory is None:
+            return ""
+        path = self.directory / "contacts" / f"{chat_id}.md"
+        return path.read_text(encoding="utf-8").strip() if path.exists() else ""
 
 
 def _read(path: Path, fallback: Path) -> str:

@@ -1,15 +1,28 @@
 """Async storage layer. Uses SQLAlchemy so SQLite can be swapped for Postgres/Supabase via DATABASE_URL."""
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import Select, and_, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from .models import Base, Direction, Draft, DraftStatus, KeyValue, Message, utcnow
+
+
+# A conversation scope: the (channel, chat_id) pairs that make up one conversation,
+# e.g. [("telegram", "123"), ("email", "vlad@x.org")]. None means "everything".
+Scope = Sequence[tuple[str, str]] | None
+
+
+def _in_scope(q: Select[Any], scope: Scope) -> Select[Any]:
+    if scope is None:
+        return q
+    if not scope:
+        return q.where(false())
+    return q.where(or_(*(and_(Message.channel == ch, Message.chat_id == str(cid)) for ch, cid in scope)))
 
 
 class Store:
@@ -89,10 +102,10 @@ class Store:
             await s.execute(update(Message).where(Message.id.in_(ids)).values(status=status))
             await s.commit()
 
-    async def recent_history(self, limit: int, before: datetime | None = None) -> list[Message]:
-        """Last `limit` messages across all channels, oldest first."""
+    async def recent_history(self, limit: int, before: datetime | None = None, scope: Scope = None) -> list[Message]:
+        """Last `limit` messages of the scope, oldest first."""
         async with self._session() as s:
-            q = select(Message)
+            q = _in_scope(select(Message), scope)
             if before is not None:
                 q = q.where(Message.timestamp <= before)
             rows = (await s.scalars(q.order_by(Message.timestamp.desc(), Message.id.desc()).limit(limit))).all()
@@ -106,10 +119,11 @@ class Store:
         channel: str | None = None,
         since: datetime | None = None,
         limit: int | None = 100,
+        scope: Scope = None,
     ) -> list[Message]:
         """Messages filtered by author (case-insensitive substring of name, or exact id), newest `limit`, oldest first."""
         async with self._session() as s:
-            q = select(Message)
+            q = _in_scope(select(Message), scope)
             if author:
                 needle = author.strip().lstrip("@").lower()
                 q = q.where(or_(func.lower(Message.author_name).contains(needle), Message.author_id == needle))
@@ -125,11 +139,11 @@ class Store:
             rows = (await s.scalars(q)).all()
         return list(reversed(rows))
 
-    async def owner_style_samples(self, limit: int) -> list[Message]:
+    async def owner_style_samples(self, limit: int, scope: Scope = None) -> list[Message]:
         """The owner's most recent messages typed by hand (not bot-sent), oldest first."""
         async with self._session() as s:
             q = (
-                select(Message)
+                _in_scope(select(Message), scope)
                 .where(Message.direction == Direction.OUT, Message.status != "sent")
                 .where(func.length(Message.text) > 0)
                 .order_by(Message.timestamp.desc())
@@ -138,20 +152,26 @@ class Store:
             rows = (await s.scalars(q)).all()
         return list(reversed(rows))
 
-    async def latest_incoming(self, author_id: str | int | None = None, channel: str | None = None) -> Message | None:
+    async def latest_incoming(
+        self, author_id: str | int | None = None, channel: str | None = None, scope: Scope = None
+    ) -> Message | None:
         async with self._session() as s:
-            q = select(Message).where(Message.direction == Direction.IN)
+            q = _in_scope(select(Message), scope).where(Message.direction == Direction.IN)
             if author_id is not None:
                 q = q.where(Message.author_id == str(author_id))
             if channel is not None:
                 q = q.where(Message.channel == channel)
             return await s.scalar(q.order_by(Message.timestamp.desc(), Message.id.desc()).limit(1))
 
-    async def unhandled_incoming(self, channel: str, author_id: str | int | None = None) -> list[Message]:
+    async def unhandled_incoming(
+        self, channel: str, author_id: str | int | None = None, chat_id: str | int | None = None
+    ) -> list[Message]:
         async with self._session() as s:
             q = select(Message).where(
                 Message.direction == Direction.IN, Message.channel == channel, Message.status == "new"
             )
+            if chat_id is not None:
+                q = q.where(Message.chat_id == str(chat_id))
             if author_id is not None:
                 q = q.where(Message.author_id == str(author_id))
             return list((await s.scalars(q.order_by(Message.timestamp, Message.id))).all())
@@ -162,18 +182,19 @@ class Store:
                 select(Message).where(Message.channel == channel).order_by(Message.timestamp.desc()).limit(1)
             )
 
-    async def last_outgoing_before(self, channel: str, moment: datetime) -> Message | None:
+    async def last_outgoing_before(self, channel: str, chat_id: str | int, moment: datetime) -> Message | None:
         async with self._session() as s:
             return await s.scalar(
                 select(Message)
-                .where(Message.channel == channel, Message.direction == Direction.OUT, Message.timestamp <= moment)
+                .where(Message.channel == channel, Message.chat_id == str(chat_id))
+                .where(Message.direction == Direction.OUT, Message.timestamp <= moment)
                 .order_by(Message.timestamp.desc())
                 .limit(1)
             )
 
-    async def participants(self) -> list[str]:
+    async def participants(self, scope: Scope = None) -> list[str]:
         async with self._session() as s:
-            rows = (await s.scalars(select(Message.author_name).distinct())).all()
+            rows = (await s.scalars(_in_scope(select(Message.author_name), scope).distinct())).all()
         return sorted({r for r in rows if r and r != "?"})
 
     async def count_messages(self) -> dict[str, int]:
@@ -233,4 +254,4 @@ class Store:
             await s.commit()
 
 
-__all__ = ["Store", "DraftStatus"]
+__all__ = ["DraftStatus", "Scope", "Store"]

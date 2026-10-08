@@ -12,11 +12,12 @@ NO_ESCALATION = {"escalate": False, "category": "none", "reason": ""}
 
 @pytest.fixture
 def env(store, persona):
-    def build(**overrides):
+    async def build(chats=None, **overrides):
         settings = make_settings(**overrides)
         llm = FakeLLM()
         sender = FakeSender(store)
-        core = Ghostwriter(settings, store, persona, llm, {"telegram": sender})
+        core = Ghostwriter(settings, store, persona, llm, {"telegram": sender}, chats=chats)
+        await core.load_state()
         notifier = FakeNotifier()
         core.notifier = notifier
         return core, llm, sender, notifier
@@ -38,7 +39,7 @@ async def wait_tasks():
 
 
 async def test_full_flow_draft_approve_send(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     await store.add_message(channel="telegram", direction="out", chat_id=200, text="ахах норм", author_name="Ivan", status="manual", timestamp=ts(10))
     llm.json_responses = [NO_ESCALATION, {"reply": "да, видел, жесть", "escalate": False, "note": ""}]
 
@@ -68,7 +69,7 @@ async def test_full_flow_draft_approve_send(env, store):
 
 
 async def test_edit_sends_owner_text(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     llm.json_responses = [NO_ESCALATION, {"reply": "draft", "escalate": False, "note": ""}]
     m, c = await incoming(store, "как дела?")
     await core.on_message(m, c)
@@ -80,7 +81,7 @@ async def test_edit_sends_owner_text(env, store):
 
 
 async def test_sensitive_message_is_escalated(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     llm.json_responses = [{"escalate": True, "category": "money", "reason": "asks for a loan"}]
     m, c = await incoming(store, "займёшь 500 евро?")
     await core.on_message(m, c)
@@ -96,7 +97,7 @@ async def test_sensitive_message_is_escalated(env, store):
 
 
 async def test_bot_question_forced_escalation_without_llm(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     m, c = await incoming(store, "слушай, это ты или бот отвечает?")
     await core.on_message(m, c)
     await wait_tasks()
@@ -104,7 +105,7 @@ async def test_bot_question_forced_escalation_without_llm(env, store):
 
 
 async def test_drafter_can_escalate(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     llm.json_responses = [NO_ESCALATION, {"reply": "", "escalate": True, "note": "need to know his plans"}]
     m, c = await incoming(store, "что у тебя нового на работе?")
     await core.on_message(m, c)
@@ -113,7 +114,7 @@ async def test_drafter_can_escalate(env, store):
 
 
 async def test_other_chat_members_do_not_trigger(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     m, c = await incoming(store, "hi all", author_id=999, name="Petya")
     await core.on_message(m, c)
     await wait_tasks()
@@ -121,7 +122,7 @@ async def test_other_chat_members_do_not_trigger(env, store):
 
 
 async def test_manual_reply_supersedes_pending(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     llm.json_responses = [NO_ESCALATION, {"reply": "draft", "escalate": False, "note": ""}]
     m, c = await incoming(store, "ну что?")
     await core.on_message(m, c)
@@ -132,7 +133,7 @@ async def test_manual_reply_supersedes_pending(env, store):
 
 
 async def test_skip_cancels_queued(env, store):
-    core, llm, sender, notifier = env(reply_delay_seconds="3600")
+    core, llm, sender, notifier = await env(reply_delay_seconds="3600")
     llm.json_responses = [NO_ESCALATION, {"reply": "draft", "escalate": False, "note": ""}]
     m, c = await incoming(store, "привет")
     await core.on_message(m, c)
@@ -145,7 +146,7 @@ async def test_skip_cancels_queued(env, store):
 
 
 async def test_send_failure_marks_failed(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     sender.fail = True
     llm.json_responses = [NO_ESCALATION, {"reply": "draft", "escalate": False, "note": ""}]
     m, c = await incoming(store, "привет")
@@ -157,7 +158,7 @@ async def test_send_failure_marks_failed(env, store):
 
 
 async def test_auto_mode_queues_without_approval(env, store):
-    core, llm, sender, notifier = env(auto_mode=True)
+    core, llm, sender, notifier = await env(auto_mode=True)
     llm.json_responses = [NO_ESCALATION, {"reply": "ок", "escalate": False, "note": ""}]
     m, c = await incoming(store, "норм?")
     await core.on_message(m, c)
@@ -166,7 +167,7 @@ async def test_auto_mode_queues_without_approval(env, store):
 
 
 async def test_request_reply_in_my_style_with_instructions(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     await store.add_message(channel="telegram", direction="out", chat_id=200, text="давно", author_name="Ivan", status="manual", timestamp=ts(60), external_id="o")
     await incoming(store, "приедешь в субботу?", 5)
     llm.json_responses = [{"reply": "в эту субботу никак, давай позже", "escalate": False, "note": ""}]
@@ -178,13 +179,13 @@ async def test_request_reply_in_my_style_with_instructions(env, store):
 
 
 async def test_request_reply_without_messages(env):
-    core, *_ = env()
+    core, *_ = await env()
     with pytest.raises(ActionError):
         await core.request_reply()
 
 
 async def test_regenerate_supersedes_old(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     llm.json_responses = [NO_ESCALATION, {"reply": "v1", "escalate": False, "note": ""}, {"reply": "v2", "escalate": False, "note": ""}]
     m, c = await incoming(store, "как ты?")
     await core.on_message(m, c)
@@ -196,7 +197,7 @@ async def test_regenerate_supersedes_old(env, store):
 
 
 async def test_summary_filters_by_author(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     await incoming(store, "от Вовы", 3)
     await store.add_message(channel="telegram", direction="out", chat_id=200, text="от меня", author_name="Ivan Petrov", status="manual", timestamp=ts(2), external_id="o")
     llm.text_responses = ["• summary"]
@@ -213,10 +214,10 @@ async def test_summary_filters_by_author(env, store):
 
 
 async def test_resume_queued_on_start(env, store):
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
     m, _ = await incoming(store, "привет")
     d = await store.create_draft(source_message_id=m.id, channel="telegram", text="hi", final_text="hi", status=DraftStatus.QUEUED, scheduled_at=ts(5))
-    core2, *_ = env()
+    core2, *_ = await env()
     core2.senders["telegram"] = sender
     await core2.start()
     core2.queue.schedule(d.id, ts(0))  # skip the resume jitter in the test
@@ -227,10 +228,12 @@ async def test_resume_queued_on_start(env, store):
 async def test_catch_up_drafts_for_unanswered_tail(env, store):
     from ghostwriter.app import catch_up
 
-    core, llm, sender, notifier = env()
+    core, llm, sender, notifier = await env()
 
     class FakeTg:
-        async def backfill(self, limit):
+        watched: set = set()
+
+        async def backfill(self, chat_id, limit, since=None):
             out = []
             for i, (direction, text, author) in enumerate([("out", "last reply", 100), ("in", "missed 1", 200), ("in", "missed 2", 200)]):
                 m, _ = await store.add_message(

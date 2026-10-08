@@ -79,5 +79,5 @@ def test_typing_seconds_bounds():
 
 def test_ids_optional_until_run():
     s = make_settings(vladimir_tg_id="", owner_tg_id="")
-    assert s.vladimir_tg_id == 0 and set(s.missing_for_run()) == {"OWNER_TG_ID", "VLADIMIR_TG_ID", "ANTHROPIC_API_KEY"}
+    assert s.vladimir_tg_id == 0 and set(s.missing_for_run()) == {"OWNER_TG_ID", "ANTHROPIC_API_KEY"}
     assert make_settings(anthropic_api_key="k").missing_for_run() == []

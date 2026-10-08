@@ -26,7 +26,11 @@ def setup_logging(level: str) -> None:
 
 async def catch_up(core: Ghostwriter, tg: TelegramGateway, limit: int) -> int:
     """Import recent history. Contact messages after the owner's last reply are treated as new (sent while offline)."""
-    created = await tg.backfill(limit)
+    if core.contact is None:
+        return 0
+    if core.current is not None and core.current.chat_id != core.contact.chat_id:
+        await tg.backfill(core.current.chat_id, limit)
+    created = await tg.backfill(core.contact.chat_id, limit)
     tail = []
     for m in reversed(created):
         if m.direction == "out":
@@ -59,14 +63,15 @@ async def run(settings: Settings) -> None:
         email = EmailGateway(settings, store)
         senders["email"] = email
 
-    core = Ghostwriter(settings, store, persona, llm, senders)
-    bot = ControlBot(settings, core, sync=lambda n: _count(tg, n))
+    core = Ghostwriter(settings, store, persona, llm, senders, chats=tg)
+    bot = ControlBot(settings, core)
     core.notifier = bot
     tg.on_message = core.on_message
     if email:
         email.on_message = core.on_message
 
     await tg.start()
+    await core.load_state()
     if settings.backfill_on_start:
         await catch_up(core, tg, settings.backfill_on_start)
     await core.start()
@@ -76,7 +81,8 @@ async def run(settings: Settings) -> None:
         tasks.append(asyncio.create_task(email.run(), name="email"))
     log.info("ghostwriter running: channels=%s model=%s", ",".join(senders), settings.anthropic_model)
     with suppress(Exception):
-        await bot.info(f"🟢 Запущен. Каналы: {', '.join(senders)}. /help")
+        who = core.contact.label if core.contact else "не выбран — /contact"
+        await bot.info(f"🟢 Запущен. Каналы: {', '.join(senders)}. Собеседник: {who}. /help")
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in done:
@@ -90,7 +96,3 @@ async def run(settings: Settings) -> None:
             await bot.close()
         await tg.stop()
         await store.close()
-
-
-async def _count(tg: TelegramGateway, limit: int) -> int:
-    return len(await tg.backfill(limit))

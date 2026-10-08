@@ -52,12 +52,20 @@ async def cmd_chats(limit: int) -> None:
     await store.close()
 
 
-async def cmd_backfill(limit: int) -> None:
+async def cmd_backfill(limit: int, chat: str | None) -> None:
     s = get_settings()
     store, tg = await _telegram(s)
     await tg.start()
-    created = await tg.backfill(limit)
-    print(f"Imported {len(created)} new messages.")
+    target: int | str
+    if chat:
+        target = int(chat) if chat.lstrip("-").isdigit() else chat
+    elif s.vladimir_tg_id:
+        target = s.watched_chat
+    else:
+        sys.exit("Pass --chat <id or @username> (see `chats`) or set VLADIMIR_TG_ID.")
+    ref = await tg.chat_ref(target)
+    created = await tg.backfill(ref.chat_id, limit)
+    print(f"{ref.title}: imported {len(created)} new messages.")
     await tg.stop()
     await store.close()
 
@@ -91,6 +99,7 @@ def main() -> None:
     c.add_argument("--limit", type=int, default=50)
     b = sub.add_parser("backfill", help="import history of the watched chat")
     b.add_argument("--limit", type=int, default=1000)
+    b.add_argument("--chat", help="chat id or @username (default: the .env contact)")
     e = sub.add_parser("export-examples", help="write your real messages to persona/examples.md")
     e.add_argument("--limit", type=int, default=150)
     e.add_argument("--out")
@@ -110,7 +119,7 @@ def main() -> None:
     elif args.cmd == "chats":
         asyncio.run(cmd_chats(args.limit))
     elif args.cmd == "backfill":
-        asyncio.run(cmd_backfill(args.limit))
+        asyncio.run(cmd_backfill(args.limit, args.chat))
     elif args.cmd == "export-examples":
         asyncio.run(cmd_export_examples(args.limit, args.out))
 
