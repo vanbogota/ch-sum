@@ -97,6 +97,25 @@ docker compose up -d
 - `AUTO_MODE=false`: если включить, неэскалированные черновики уходят без подтверждения
   (карточка всё равно приходит, отправку можно отменить)
 
+## Через LiteLLM (и Langfuse)
+
+Ассистент может ходить к Claude не напрямую, а через твой LiteLLM. Тогда учёт расходов и трейсы
+в Langfuse настраиваются на стороне LiteLLM. В `.env`:
+
+```
+ANTHROPIC_BASE_URL=http://host.docker.internal:4000/anthropic
+ANTHROPIC_API_KEY=sk-...          # виртуальный ключ LiteLLM
+ANTHROPIC_MODEL=claude-sonnet-5   # модель Anthropic
+```
+
+`/anthropic` — сквозной (pass-through) маршрут LiteLLM: запрос уходит в Anthropic как есть, поэтому
+структурированный вывод (`output_config`) и кэширование промптов работают без изменений. Можно
+указать и `http://host.docker.internal:4000` (общий эндпоинт `/v1/messages`). Тогда `ANTHROPIC_MODEL`
+должен совпадать с `model_name` из конфига LiteLLM, но новые параметры API LiteLLM может не передать.
+
+Если LiteLLM запущен в другом compose-проекте, вместо `host.docker.internal` можно подключить
+его сеть (закомментированный блок в `docker-compose.yml`) и писать `http://litellm:4000/anthropic`.
+
 ## Безопасность
 
 - `.env`, `secrets/`, `*.session`, `data/`, `persona/context.md` и `persona/examples.md` в `.gitignore`.

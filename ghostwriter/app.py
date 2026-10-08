@@ -44,7 +44,11 @@ async def run(settings: Settings) -> None:
     store = Store(settings.database_url)
     await store.init()
     persona = Persona.load(settings.persona_dir)
-    llm = LLM(settings.anthropic_model, settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None)
+    llm = LLM(
+        settings.anthropic_model,
+        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None,
+        base_url=settings.anthropic_base_url,
+    )
 
     tg = TelegramGateway(settings, store)
     senders: dict[str, Sender] = {"telegram": tg}

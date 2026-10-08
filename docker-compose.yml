@@ -7,5 +7,16 @@ services:
       - ./data:/app/data
       - ./secrets:/app/secrets
       - ./persona:/app/persona   # writable: export-examples writes persona/examples.md
+    # Lets the container reach services published on the host (e.g. LiteLLM on :4000)
+    # as http://host.docker.internal:4000, on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Alternative: join the LiteLLM compose network and use http://litellm:4000
+    # networks: [default, litellm]
     # First run (interactive Telegram login):
     #   docker compose run --rm ghostwriter login
+
+# networks:
+#   litellm:
+#     external: true
+#     name: litellm_default   # see `docker network ls`
