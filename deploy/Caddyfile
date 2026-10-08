@@ -1,0 +1,8 @@
+# HTTPS reverse proxy for the MCP connector. Caddy gets a Let's Encrypt certificate automatically.
+# MCP_DOMAIN: your domain, or a free name for the server's IP, e.g. 203-0-113-7.sslip.io
+{$MCP_DOMAIN} {
+	reverse_proxy ghostwriter:8765 {
+		# stream responses as they come
+		flush_interval -1
+	}
+}

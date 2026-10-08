@@ -7,6 +7,9 @@ services:
       - ./data:/app/data
       - ./secrets:/app/secrets
       - ./persona:/app/persona   # writable: export-examples writes persona/examples.md
+    # MCP connector port, reachable only from this machine (Caddy / a tunnel publishes it).
+    ports:
+      - "127.0.0.1:8765:8765"
     # Lets the container reach services published on the host (e.g. LiteLLM on :4000)
     # as http://host.docker.internal:4000, on Linux too.
     extra_hosts:
@@ -15,6 +18,25 @@ services:
     # networks: [default, litellm]
     # First run (interactive Telegram login):
     #   docker compose run --rm ghostwriter login
+
+  # HTTPS for the MCP connector: `docker compose --profile https up -d`
+  # Needs MCP_DOMAIN in .env and ports 80/443 open on the server.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [ghostwriter]
+
+volumes:
+  caddy_data:
 
 # networks:
 #   litellm:

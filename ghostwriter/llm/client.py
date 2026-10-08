@@ -84,3 +84,18 @@ class LLM:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise LLMError("Claude returned invalid JSON") from exc
+
+
+class DisabledLLM(LLM):
+    """Used when no ANTHROPIC_API_KEY is configured (MCP-connector-only mode)."""
+
+    def __init__(self) -> None:  # noqa: D107 - no client is created
+        self.model = "-"
+        self.tag_requests = False
+
+    async def _create(self, *, system: str, user: str, max_tokens: int, purpose: str, **extra: Any) -> str:
+        raise LLMError(
+            "ANTHROPIC_API_KEY не задан: бот работает без Claude. "
+            "Саммари и черновики делай в приложении Claude через MCP-коннектор."
+        )
+

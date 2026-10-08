@@ -143,7 +143,10 @@ class TelegramGateway:
         """
         if reply_to is None:
             raise ValueError("telegram send needs the message being answered")
-        chat_id = int(reply_to.chat_id)
+        return await self.send_to(int(reply_to.chat_id), text)
+
+    async def send_to(self, chat_id: int, text: str) -> Message:
+        """Send a message into a chat as the owner (with "typing…") and record it."""
         async with self._send_lock:
             async with self.client.action(chat_id, "typing"):
                 await asyncio.sleep(typing_seconds(text))
@@ -163,6 +166,16 @@ class TelegramGateway:
             if not created:
                 await self.store.set_message_status(stored.id, MessageStatus.SENT)
         return stored
+
+    async def search(self, chat_id: int, text: str, limit: int = 30) -> list[Message]:
+        """Telegram's own full-history search in a chat. Results are stored too; newest first."""
+        found: list[Message] = []
+        async for m in self.client.iter_messages(chat_id, search=text, limit=limit):
+            if m.action is not None:
+                continue
+            stored, _ = await self._store(m, status=MessageStatus.MANUAL if m.out else MessageStatus.IGNORED)
+            found.append(stored)
+        return found
 
     async def list_dialogs(self, limit: int = 50) -> list[tuple[int, str, str]]:
         return [(c.chat_id, c.kind, c.title) for c in await self.search_chats(None, limit=limit)]

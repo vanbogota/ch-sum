@@ -85,6 +85,8 @@ class ControlBot:
         self.owner = settings.owner_tg_id
         self.tz = settings.tz
         self._choices: dict[int, ChatRef] = {}  # chats offered in the last chooser
+        if settings.control_bot_token is None:
+            raise ValueError("CONTROL_BOT_TOKEN is not set")
         self.bot = Bot(settings.control_bot_token.get_secret_value(), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         self.dp = Dispatcher()
         self.awaiting_edit: int | None = None

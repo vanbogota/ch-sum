@@ -9,6 +9,7 @@ RUN pip install . && useradd --create-home --uid 1000 app && mkdir -p /app/data 
 
 COPY persona/escalation.toml persona/*.example.md ./persona/
 USER app
+EXPOSE 8765
 
 # data/ (SQLite), secrets/ (Telegram session) and persona/ are mounted as volumes
 ENTRYPOINT ["python", "-m", "ghostwriter"]

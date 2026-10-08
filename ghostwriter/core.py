@@ -121,6 +121,8 @@ class Ghostwriter:
         self.hours = ActiveHours(*settings.active_window, tz)
         self.queue = SendQueue(self.deliver)
         self.notifier: Notifier | None = None
+        # Automatic drafts need Claude via the API and someone to approve them in the control bot.
+        self.auto_drafts = settings.llm_enabled and settings.bot_enabled
         # contact: whose messages get auto-drafts; current: the chat commands work on by default
         self.contact: ChatRef | None = None
         self.current: ChatRef | None = None
@@ -298,7 +300,7 @@ class Ghostwriter:
             return
         if msg.direction == Direction.IN:
             if self.is_contact(msg):
-                if msg.status == MessageStatus.NEW:
+                if msg.status == MessageStatus.NEW and self.auto_drafts:
                     self.schedule_processing(msg.channel)
             else:
                 await self.store.set_message_status(msg.id, MessageStatus.IGNORED)
