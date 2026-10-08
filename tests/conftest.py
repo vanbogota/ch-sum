@@ -38,13 +38,16 @@ class FakeLLM:
         self.json_responses: list[dict[str, Any]] = []
         self.text_responses: list[str] = []
         self.calls: list[tuple[str, str, str]] = []
+        self.purposes: list[str] = []
 
-    async def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 0) -> dict[str, Any]:
+    async def json(self, system: str, user: str, schema: dict[str, Any], max_tokens: int = 0, purpose: str = "") -> dict[str, Any]:
         self.calls.append(("json", system, user))
+        self.purposes.append(purpose)
         return self.json_responses.pop(0)
 
-    async def text(self, system: str, user: str, max_tokens: int = 0) -> str:
+    async def text(self, system: str, user: str, max_tokens: int = 0, purpose: str = "") -> str:
         self.calls.append(("text", system, user))
+        self.purposes.append(purpose)
         return self.text_responses.pop(0)
 
 

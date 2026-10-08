@@ -94,7 +94,7 @@ Rules:
             parts.append(
                 f"{self.owner_name}'s instructions for this reply (follow them; they override the defaults): {instructions}"
             )
-        result = await self.llm.json(self.system_prompt(), "\n\n".join(parts), SCHEMA, max_tokens=3000)
+        result = await self.llm.json(self.system_prompt(), "\n\n".join(parts), SCHEMA, max_tokens=3000, purpose="draft")
         text = str(result.get("reply", "")).strip()
         escalate = bool(result.get("escalate")) or not text
         return DraftResult(text=text, escalate=escalate, note=str(result.get("note", "")).strip())

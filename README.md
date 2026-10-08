@@ -113,6 +113,10 @@ ANTHROPIC_MODEL=claude-sonnet-5   # модель Anthropic
 указать и `http://host.docker.internal:4000` (общий эндпоинт `/v1/messages`). Тогда `ANTHROPIC_MODEL`
 должен совпадать с `model_name` из конфига LiteLLM, но новые параметры API LiteLLM может не передать.
 
+Через шлюз каждый запрос помечается тегами `ghostwriter` и назначением: `route` (разбор команды),
+`summary`, `question`, `escalation`, `draft`. LiteLLM передаёт их в Langfuse как теги трейса
+(фильтр Trace Tags), так видно, что сколько стоит и где модель ошиблась.
+
 Если LiteLLM запущен в другом compose-проекте, вместо `host.docker.internal` можно подключить
 его сеть (закомментированный блок в `docker-compose.yml`) и писать `http://litellm:4000/anthropic`.
 

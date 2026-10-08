@@ -73,7 +73,7 @@ class EscalationChecker:
             + "\n".join(format_message(m, self.tz, self.owner_name) for m in new_messages)
             + hint
         )
-        result = await self.llm.json(self._system(), user, SCHEMA, max_tokens=1000)
+        result = await self.llm.json(self._system(), user, SCHEMA, max_tokens=1000, purpose="escalation")
         escalate = bool(result.get("escalate"))
         category = result.get("category") or None
         if category == "none":

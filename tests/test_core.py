@@ -55,6 +55,7 @@ async def test_full_flow_draft_approve_send(env, store):
     assert "видел матч?" in drafter_prompt and "вот это был гол" in drafter_prompt
     assert "ахах норм" in drafter_prompt  # owner's own messages used as style reference
     assert "Ivan" in llm.calls[1][1]
+    assert llm.purposes == ["escalation", "draft"]
 
     d = await core.approve(draft.id)
     assert d.status == DraftStatus.QUEUED

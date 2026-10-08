@@ -59,7 +59,7 @@ class Analyst:
             f"'me'/'мои'/'я' refers to {self.owner_name}. Known chat participants: {', '.join(participants) or 'unknown'}; "
             "map names and their inflected forms (e.g. 'от Володи' -> Vladimir) to one of them. JSON only."
         )
-        r = await self.llm.json(system, command, ROUTE_SCHEMA, max_tokens=800)
+        r = await self.llm.json(system, command, ROUTE_SCHEMA, max_tokens=800, purpose="route")
         limit = r.get("limit")
         since = r.get("since_hours")
         return Intent(
@@ -85,11 +85,11 @@ class Analyst:
         if focus:
             ask += f"\nFocus / request: {focus}"
         user = f"{ask}\n\nMessages (oldest first):\n{format_history(messages, self.tz, self.owner_name)}"
-        return await self.llm.text(self._system(), user, max_tokens=3000)
+        return await self.llm.text(self._system(), user, max_tokens=3000, purpose="summary")
 
     async def answer(self, question: str, messages: Sequence[Message]) -> str:
         user = (
             f"Question: {question}\n\nMessages (oldest first):\n"
             f"{format_history(messages, self.tz, self.owner_name)}"
         )
-        return await self.llm.text(self._system(), user, max_tokens=3000)
+        return await self.llm.text(self._system(), user, max_tokens=3000, purpose="question")
