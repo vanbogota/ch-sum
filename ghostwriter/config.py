@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     tg_api_hash: SecretStr
     tg_session_path: Path = Path("./secrets/ivan.session")
 
-    # Control bot
-    control_bot_token: SecretStr
+    # Control bot (optional when only the MCP connector is used)
+    control_bot_token: SecretStr | None = None
     owner_tg_id: int = 0
 
     # Contact
@@ -90,6 +90,18 @@ class Settings(BaseSettings):
     auto_mode: bool = False
     log_level: str = "INFO"
 
+    # MCP server (connector for the Claude apps)
+    mcp_enabled: bool = False
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8765
+    mcp_token: SecretStr | None = None
+    mcp_allow_send: bool = False
+
+    @field_validator("control_bot_token", "anthropic_api_key", "mcp_token", mode="before")
+    @classmethod
+    def _empty_secret_to_none(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
+
     @field_validator("anthropic_base_url", "tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
     @classmethod
     def _empty_to_none(cls, v: object) -> object:
@@ -100,11 +112,26 @@ class Settings(BaseSettings):
     def _empty_to_zero(cls, v: object) -> object:
         return 0 if isinstance(v, str) and not v.strip() else v
 
+    @property
+    def bot_enabled(self) -> bool:
+        return self.control_bot_token is not None and bool(self.control_bot_token.get_secret_value().strip())
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.anthropic_api_key is not None and bool(self.anthropic_api_key.get_secret_value().strip())
+
     def missing_for_run(self) -> list[str]:
-        # VLADIMIR_TG_ID is optional: the contact can be chosen in the bot with /contact.
-        missing = ["OWNER_TG_ID"] if not self.owner_tg_id else []
-        if not self.anthropic_api_key:
-            missing.append("ANTHROPIC_API_KEY")
+        """What must be set before `run`. Two modes: control bot (needs an API key) and/or MCP connector."""
+        missing = []
+        if not self.bot_enabled and not self.mcp_enabled:
+            missing.append("CONTROL_BOT_TOKEN or MCP_ENABLED=true")
+        if self.bot_enabled:
+            if not self.owner_tg_id:
+                missing.append("OWNER_TG_ID")
+            if not self.llm_enabled and not self.mcp_enabled:
+                missing.append("ANTHROPIC_API_KEY")
+        if self.mcp_enabled and (self.mcp_token is None or len(self.mcp_token.get_secret_value()) < 24):
+            missing.append("MCP_TOKEN (24+ characters, e.g. `openssl rand -hex 24`)")
         return missing
 
     @field_validator("active_hours")

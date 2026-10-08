@@ -77,7 +77,15 @@ def test_typing_seconds_bounds():
     assert typing_seconds("x" * 10_000) == 25.0
 
 
-def test_ids_optional_until_run():
-    s = make_settings(vladimir_tg_id="", owner_tg_id="")
-    assert s.vladimir_tg_id == 0 and set(s.missing_for_run()) == {"OWNER_TG_ID", "ANTHROPIC_API_KEY"}
+def test_run_requirements_by_mode():
+    bot_only = make_settings(owner_tg_id="", anthropic_api_key="")
+    assert set(bot_only.missing_for_run()) == {"OWNER_TG_ID", "ANTHROPIC_API_KEY"}
     assert make_settings(anthropic_api_key="k").missing_for_run() == []
+    # MCP-only: no bot, no API key
+    mcp_only = make_settings(control_bot_token="", anthropic_api_key="", mcp_enabled=True, mcp_token="x" * 30)
+    assert mcp_only.missing_for_run() == [] and not mcp_only.bot_enabled and not mcp_only.llm_enabled
+    weak = make_settings(control_bot_token="", mcp_enabled=True, mcp_token="short")
+    assert any("MCP_TOKEN" in m for m in weak.missing_for_run())
+    assert make_settings(control_bot_token="", anthropic_api_key="").missing_for_run() == [
+        "CONTROL_BOT_TOKEN or MCP_ENABLED=true"
+    ]

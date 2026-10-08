@@ -9,7 +9,7 @@ from .channels.telegram import TelegramGateway
 from .config import Settings
 from .control.bot import ControlBot
 from .core import Ghostwriter, Sender
-from .llm import LLM
+from .llm import LLM, DisabledLLM
 from .persona import Persona
 from .storage import Channel, DraftStatus, Store
 from .storage.models import MessageStatus
@@ -37,7 +37,7 @@ async def catch_up(core: Ghostwriter, tg: TelegramGateway, limit: int) -> int:
             break
         if core.is_contact(m):
             tail.append(m)
-    if tail and not await core.store.drafts_by_status(DraftStatus.PENDING, channel=Channel.TELEGRAM):
+    if tail and core.auto_drafts and not await core.store.drafts_by_status(DraftStatus.PENDING, channel=Channel.TELEGRAM):
         await core.store.set_message_statuses((m.id for m in tail), MessageStatus.NEW)
         core.schedule_processing(Channel.TELEGRAM)
     return len(created)
@@ -48,10 +48,14 @@ async def run(settings: Settings) -> None:
     store = Store(settings.database_url)
     await store.init()
     persona = Persona.load(settings.persona_dir)
-    llm = LLM(
-        settings.anthropic_model,
-        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None,
-        base_url=settings.anthropic_base_url,
+    llm: LLM = (
+        LLM(
+            settings.anthropic_model,
+            settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None,
+            base_url=settings.anthropic_base_url,
+        )
+        if settings.llm_enabled
+        else DisabledLLM()
     )
 
     tg = TelegramGateway(settings, store)
@@ -64,7 +68,7 @@ async def run(settings: Settings) -> None:
         senders["email"] = email
 
     core = Ghostwriter(settings, store, persona, llm, senders, chats=tg)
-    bot = ControlBot(settings, core)
+    bot = ControlBot(settings, core) if settings.bot_enabled else None
     core.notifier = bot
     tg.on_message = core.on_message
     if email:
@@ -76,13 +80,26 @@ async def run(settings: Settings) -> None:
         await catch_up(core, tg, settings.backfill_on_start)
     await core.start()
 
-    tasks = [asyncio.create_task(tg.run(), name="telegram"), asyncio.create_task(bot.run(), name="control-bot")]
+    tasks = [asyncio.create_task(tg.run(), name="telegram")]
+    if bot:
+        tasks.append(asyncio.create_task(bot.run(), name="control-bot"))
     if email:
         tasks.append(asyncio.create_task(email.run(), name="email"))
-    log.info("ghostwriter running: channels=%s model=%s", ",".join(senders), settings.anthropic_model)
-    with suppress(Exception):
-        who = core.contact.label if core.contact else "не выбран — /contact"
-        await bot.info(f"🟢 Запущен. Каналы: {', '.join(senders)}. Собеседник: {who}. /help")
+    if settings.mcp_enabled:
+        from . import mcp_server
+
+        tasks.append(asyncio.create_task(mcp_server.serve(core, tg, settings), name="mcp"))
+    log.info(
+        "ghostwriter running: channels=%s claude=%s auto-drafts=%s mcp=%s",
+        ",".join(senders), settings.anthropic_model if settings.llm_enabled else "off",
+        core.auto_drafts, settings.mcp_enabled,
+    )
+    if bot:
+        with suppress(Exception):
+            who = core.contact.label if core.contact else "не выбран — /contact"
+            mode = "" if core.auto_drafts else " Автоматические черновики выключены (нет ANTHROPIC_API_KEY)."
+            mcp = " MCP-коннектор включён." if settings.mcp_enabled else ""
+            await bot.info(f"🟢 Запущен. Каналы: {', '.join(senders)}. Собеседник: {who}.{mode}{mcp} /help")
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in done:
@@ -92,7 +109,8 @@ async def run(settings: Settings) -> None:
         for t in tasks:
             t.cancel()
         await core.stop()
-        with suppress(Exception):
-            await bot.close()
+        if bot:
+            with suppress(Exception):
+                await bot.close()
         await tg.stop()
         await store.close()

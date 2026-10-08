@@ -10,6 +10,8 @@ dependencies = [
     "aiogram>=3.31,<4",
     "sqlalchemy[asyncio]>=2.0,<3",
     "aiosqlite>=0.20",
+    "mcp>=2.3,<3",
+    "uvicorn>=0.30",
     "pydantic-settings>=2.4,<3",
     "tzdata",
 ]
