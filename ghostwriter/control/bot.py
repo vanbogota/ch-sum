@@ -36,10 +36,20 @@ class SelectCb(CallbackData, prefix="s"):
     chat_id: int
 
 
-def chooser(refs: Sequence[ChatRef], target: str) -> InlineKeyboardMarkup:
+class PageCb(CallbackData, prefix="p"):
+    target: str  # contact | chat
+    offset: int
+
+
+PAGE = 10
+
+
+def chooser(refs: Sequence[ChatRef], target: str, next_offset: int | None = None) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for ref in refs:
         b.button(text=ref.label[:60], callback_data=SelectCb(target=target, chat_id=ref.chat_id))
+    if next_offset is not None:
+        b.button(text="Ещё ▶", callback_data=PageCb(target=target, offset=next_offset))
     b.adjust(1)
     return b.as_markup()
 
@@ -147,6 +157,7 @@ class ControlBot:
         r.message.register(self.on_text, F.text)
         r.callback_query.register(self.on_button, DraftCb.filter())
         r.callback_query.register(self.on_select, SelectCb.filter())
+        r.callback_query.register(self.on_page, PageCb.filter())
         return r
 
     async def _reply_long(self, m: TgMessage, text: str) -> None:
@@ -208,13 +219,30 @@ class ControlBot:
 
     # ------------------------------------------------------- chat selection
 
-    async def _offer(self, m: TgMessage, refs: Sequence[ChatRef], target: str, text: str) -> None:
+    async def _offer(
+        self, m: TgMessage, refs: Sequence[ChatRef], target: str, text: str, next_offset: int | None = None
+    ) -> None:
         self._choices.update({r.chat_id: r for r in refs})
-        await m.answer(text, reply_markup=chooser(refs, target), parse_mode=None)
+        await m.answer(text, reply_markup=chooser(refs, target, next_offset), parse_mode=None)
+
+    async def _page(self, target: str, offset: int) -> tuple[list[ChatRef], int | None]:
+        """One page of recent chats, and the offset of the next page if there is one."""
+        kinds = {"user"} if target == "contact" else None
+        refs = await self.core.find_chats(None, kinds, limit=offset + PAGE + 1)
+        page = refs[offset : offset + PAGE]
+        return page, (offset + PAGE if len(refs) > offset + PAGE else None)
 
     async def _pick(self, m: TgMessage, target: str, query: str | None) -> None:
         kinds = {"user"} if target == "contact" else None
+        what = "собеседника" if target == "contact" else "чат для саммари и вопросов"
+        cmd = "/contact" if target == "contact" else "/chat"
         try:
+            if not query:
+                refs, more = await self._page(target, 0)
+                await self._offer(
+                    m, refs, target, f"Выбери {what}. Нет нужного? Напиши {cmd} и часть имени или @username.", more
+                )
+                return
             refs = await self.core.find_chats(query, kinds)
         except ActionError as exc:
             await m.answer(f"⚠️ {exc}", parse_mode=None)
@@ -222,12 +250,11 @@ class ControlBot:
         if not refs:
             await m.answer(f"Не нашёл чат «{query}». Попробуй часть имени или @username.", parse_mode=None)
             return
-        exact = [r for r in refs if query and r.title.casefold() == query.strip().casefold()]
-        if query and (len(refs) == 1 or len(exact) == 1):
+        exact = [r for r in refs if r.title.casefold() == query.strip().casefold()]
+        if len(refs) == 1 or len(exact) == 1:
             await self._run(m, self._select(target, (exact or refs)[0]))
             return
-        what = "собеседника" if target == "contact" else "чат для саммари и вопросов"
-        await self._offer(m, refs, target, f"Выбери {what}:")
+        await self._offer(m, refs, target, f"Нашёл по «{query}». Выбери {what}:")
 
     async def _select(self, target: str, ref: ChatRef) -> str:
         if target == "contact":
@@ -262,6 +289,22 @@ class ControlBot:
             except TelegramBadRequest:
                 pass
         await self.info(text)
+
+    async def on_page(self, q: CallbackQuery, callback_data: PageCb) -> None:
+        await q.answer()
+        try:
+            refs, more = await self._page(callback_data.target, callback_data.offset)
+        except ActionError as exc:
+            await self.info(f"⚠️ {exc}")
+            return
+        self._choices.update({r.chat_id: r for r in refs})
+        if q.message is not None and refs:
+            try:
+                await q.message.edit_reply_markup(  # type: ignore[union-attr]
+                    reply_markup=chooser(refs, callback_data.target, more)
+                )
+            except TelegramBadRequest as exc:
+                log.debug("chooser page: %s", exc)
 
     async def cmd_status(self, m: TgMessage) -> None:
         counts = await self.core.store.count_messages()

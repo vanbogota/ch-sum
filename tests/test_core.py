@@ -248,3 +248,27 @@ async def test_catch_up_drafts_for_unanswered_tail(env, store):
     assert await catch_up(core, FakeTg(), 10) == 3
     await wait_tasks()
     assert notifier.cards and "missed 1" in llm.calls[1][2] and "missed 2" in llm.calls[1][2]
+
+
+async def test_draft_prompt_stays_small(env, store):
+    """A burst of long unanswered messages and long own messages must not blow up the prompt."""
+    core, llm, sender, notifier = await env()
+    long = "очень длинный пересланный пост " * 200  # ~6000 chars
+    for i in range(40):
+        await store.add_message(channel="telegram", direction="out", chat_id=200, text=f"мой {i} " + long,
+                                author_name="Ivan", status="manual", external_id=f"o{i}", timestamp=ts(10_000 - i))
+    msgs = []
+    for i in range(17):
+        m, c = await incoming(store, f"пост {i} " + long, 1000 - i * 10, ext=f"in{i}")
+        msgs.append((m, c))
+    llm.json_responses = [NO_ESCALATION, {"reply": "ок", "escalate": False, "note": ""}]
+    for m, c in msgs:
+        await core.on_message(m, c)
+    await wait_tasks()
+
+    escalation_prompt, draft_prompt = llm.calls[0][2], llm.calls[1][2]
+    to_reply = draft_prompt.split("Messages to reply to:")[1]
+    assert "пост 16 " in to_reply and "пост 11 " in to_reply and "пост 10 " not in to_reply  # newest 6 only
+    assert len(draft_prompt) < 25_000 and len(escalation_prompt) < 16_000
+    statuses = [(await store.get_message(m.id)).status for m, _ in msgs]
+    assert set(statuses) == {"handled"}  # older ones count as answered too

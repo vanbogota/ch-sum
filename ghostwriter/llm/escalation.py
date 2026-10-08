@@ -39,8 +39,15 @@ def keyword_hits(categories: Sequence[EscalationCategory], text: str) -> list[Es
 
 class EscalationChecker:
     def __init__(
-        self, llm: LLM, categories: Sequence[EscalationCategory], tz: ZoneInfo, owner_name: str, contact_name: str
+        self,
+        llm: LLM,
+        categories: Sequence[EscalationCategory],
+        tz: ZoneInfo,
+        owner_name: str,
+        contact_name: str,
+        max_chars: int = 700,
     ) -> None:
+        self.max_chars = max_chars
         self.llm = llm
         self.categories = tuple(categories)
         self.tz = tz
@@ -70,9 +77,9 @@ class EscalationChecker:
 
         hint = f"\nKeyword pre-filter matched: {', '.join(c.name for c in hits)} (may be false positives)." if hits else ""
         user = (
-            f"Recent conversation:\n{format_history(history, self.tz, self.owner_name)}\n\n"
+            f"Recent conversation:\n{format_history(history, self.tz, self.owner_name, self.max_chars)}\n\n"
             f"NEW messages to screen:\n"
-            + "\n".join(format_message(m, self.tz, self.owner_name) for m in new_messages)
+            + "\n".join(format_message(m, self.tz, self.owner_name, self.max_chars * 2) for m in new_messages)
             + hint
         )
         result = await self.llm.json(self._system(contact_name or self.contact_name), user, SCHEMA, max_tokens=1000, purpose="escalation")

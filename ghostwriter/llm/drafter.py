@@ -47,7 +47,10 @@ class DraftResult:
 
 
 class Drafter:
-    def __init__(self, llm: LLM, persona: Persona, tz: ZoneInfo, owner_name: str, contact_name: str) -> None:
+    def __init__(
+        self, llm: LLM, persona: Persona, tz: ZoneInfo, owner_name: str, contact_name: str, max_chars: int = 700
+    ) -> None:
+        self.max_chars = max_chars
         self.llm = llm
         self.persona = persona
         self.tz = tz
@@ -92,8 +95,10 @@ Rules:
         guidance = CHANNEL_GUIDANCE.get(source.channel, "")
         parts = [
             f"More recent examples of how {self.owner_name} writes (typed by hand):\n{format_style_samples(style_samples)}",
-            f"Conversation so far (both channels, oldest first):\n{format_history(history, self.tz, self.owner_name)}",
-            "Messages to reply to:\n" + "\n".join(format_message(m, self.tz, self.owner_name) for m in new_messages),
+            "Earlier conversation (oldest first; long messages are cut):\n"
+            + format_history(history, self.tz, self.owner_name, self.max_chars),
+            "Messages to reply to:\n"
+            + "\n".join(format_message(m, self.tz, self.owner_name, self.max_chars * 2) for m in new_messages),
             f"Reply channel: {source.channel}. {guidance}",
         ]
         if instructions:
