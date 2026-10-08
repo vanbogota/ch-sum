@@ -244,7 +244,7 @@ class Ghostwriter:
             log.exception("sync of chat %s failed; using stored messages", ref.chat_id)
             return 0
 
-    async def find_chats(self, query: str | None, kinds: set[str] | None = None, limit: int = 8) -> list[ChatRef]:
+    async def find_chats(self, query: str | None, kinds: set[str] | None = None, limit: int = 10) -> list[ChatRef]:
         if self.chats is None:
             raise ActionError("Telegram недоступен.")
         return await self.chats.search_chats(query, kinds, limit)

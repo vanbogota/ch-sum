@@ -1,4 +1,4 @@
-from ghostwriter.control.bot import ControlBot, DraftCb, keyboard
+from ghostwriter.control.bot import ControlBot, DraftCb, chooser, keyboard
 from ghostwriter.control.render import render_card
 from ghostwriter.core import Ghostwriter
 from ghostwriter.storage import DraftStatus
@@ -53,3 +53,23 @@ def test_chooser_buttons():
     data = [SelectCb.unpack(row[0].callback_data) for row in kb.inline_keyboard]
     assert [(d.target, d.chat_id) for d in data] == [("chat", -1), ("chat", 5)]
     assert kb.inline_keyboard[0][0].text == "👥 Работа"
+
+
+async def test_chooser_pages(store, persona):
+    from ghostwriter.chats import ChatRef
+    from ghostwriter.control.bot import PAGE, PageCb
+
+    from .conftest import FakeChats
+
+    refs = [ChatRef(i, f"user{i}", "user", i) for i in range(1, 24)]
+    chats = FakeChats(refs)
+    settings = make_settings()
+    core = Ghostwriter(settings, store, persona, FakeLLM(), {}, chats=chats)
+    bot = ControlBot(settings, core)
+    page, more = await bot._page("contact", 0)
+    assert len(page) == PAGE and more == PAGE
+    page, more = await bot._page("contact", 20)
+    assert [r.chat_id for r in page] == [21, 22, 23] and more is None
+    kb = chooser(page, "contact", 30)
+    assert PageCb.unpack(kb.inline_keyboard[-1][0].callback_data).offset == 30
+    await bot.bot.session.close()

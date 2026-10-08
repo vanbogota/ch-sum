@@ -169,10 +169,10 @@ class TelegramGateway:
 
     async def search_chats(self, query: str | None, kinds: set[str] | None = None, limit: int = 10) -> list[ChatRef]:
         """Recent dialogs, optionally filtered by name / @username / id. Exact matches come first."""
-        needle = (query or "").strip().lstrip("@").casefold()
+        needle = _norm((query or "").strip().lstrip("@"))
         exact: list[ChatRef] = []
         partial: list[ChatRef] = []
-        async for d in self.client.iter_dialogs(limit=300 if needle else limit * 3):
+        async for d in self.client.iter_dialogs():  # all dialogs, archived included; newest first
             if getattr(d.entity, "bot", False) or d.id == 777000:  # skip bots and the Telegram service chat
                 continue
             ref = _dialog_ref(d)
@@ -181,8 +181,8 @@ class TelegramGateway:
             if not needle:
                 partial.append(ref)
             else:
-                username = (getattr(d.entity, "username", None) or "").casefold()
-                names = {ref.title.casefold(), username, str(ref.chat_id)}
+                username = _norm(getattr(d.entity, "username", None) or "")
+                names = {_norm(ref.title), username, str(ref.chat_id)}
                 if needle in names:
                     exact.append(ref)
                 elif any(needle in n for n in names if n):
@@ -196,6 +196,10 @@ class TelegramGateway:
         kind = "user" if isinstance(entity, User) else "channel" if getattr(entity, "broadcast", False) else "group"
         peer_id = utils.get_peer_id(entity)
         return ChatRef(peer_id, utils.get_display_name(entity) or str(peer_id), kind, peer_id if kind == "user" else None)
+
+
+def _norm(text: str) -> str:
+    return text.casefold().replace("ё", "е")
 
 
 def _dialog_ref(d: object) -> ChatRef:
