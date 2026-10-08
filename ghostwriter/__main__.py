@@ -23,8 +23,19 @@ async def cmd_login() -> None:
     s = get_settings()
     s.tg_session_path.parent.mkdir(parents=True, exist_ok=True)
     client = TelegramClient(str(s.tg_session_path), s.tg_api_id, s.tg_api_hash.get_secret_value())
-    await client.start()  # prompts for phone, code and 2FA password
+    def ask_phone() -> str:
+        while True:
+            value = input("Your phone number in international format (e.g. +358401234567): ").strip()
+            if ":" in value:
+                print("That looks like a bot token. Log in with YOUR phone number: the assistant works as you.")
+                continue
+            return value
+
+    await client.start(phone=ask_phone)  # then asks for the login code (sent in Telegram) and 2FA password
     me = await client.get_me()
+    if me.bot:
+        await client.log_out()
+        sys.exit("Logged in as a bot: run `login` again with your phone number.")
     print(f"Logged in as {me.first_name} (id {me.id}). Session saved to {s.tg_session_path}")
     await client.disconnect()
 
