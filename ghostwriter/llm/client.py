@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 import anthropic
@@ -19,10 +20,19 @@ class LLMRefusal(LLMError):
 
 
 class LLM:
-    def __init__(self, model: str, api_key: str | None = None, client: anthropic.AsyncAnthropic | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        client: anthropic.AsyncAnthropic | None = None,
+    ) -> None:
         self.model = model
-        # With api_key=None the SDK resolves credentials from the environment.
-        self._client = client or anthropic.AsyncAnthropic(api_key=api_key)
+        # An empty ANTHROPIC_BASE_URL in the environment would override the SDK default with "".
+        if not os.environ.get("ANTHROPIC_BASE_URL", "x").strip():
+            os.environ.pop("ANTHROPIC_BASE_URL")
+        # With api_key/base_url=None the SDK resolves them from the environment / its defaults.
+        self._client = client or anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
 
     async def _create(self, *, system: str, user: str, max_tokens: int, **extra: Any) -> str:
         try:

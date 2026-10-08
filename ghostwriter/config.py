@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # Claude
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-sonnet-5"
+    # Optional proxy/gateway (e.g. LiteLLM). Empty = Anthropic API directly.
+    anthropic_base_url: str | None = None
 
     # Telegram userbot
     tg_api_id: int
@@ -84,7 +86,7 @@ class Settings(BaseSettings):
     auto_mode: bool = False
     log_level: str = "INFO"
 
-    @field_validator("tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
+    @field_validator("anthropic_base_url", "tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
     @classmethod
     def _empty_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
