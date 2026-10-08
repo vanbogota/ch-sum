@@ -1,0 +1,11 @@
+services:
+  ghostwriter:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+      - ./persona:/app/persona   # writable: export-examples writes persona/examples.md
+    # First run (interactive Telegram login):
+    #   docker compose run --rm ghostwriter login

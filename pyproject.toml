@@ -1,0 +1,33 @@
+[project]
+name = "ghostwriter"
+version = "0.1.0"
+description = "Personal Telegram/email assistant: summarizes a chat and drafts replies in the owner's style, with human approval."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.9,<2",
+    "telethon>=1.45,<2",
+    "aiogram>=3.31,<4",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "aiosqlite>=0.20",
+    "pydantic-settings>=2.4,<3",
+    "tzdata",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "httpx2>=2.0"]
+postgres = ["asyncpg>=0.29"]
+
+[project.scripts]
+ghostwriter = "ghostwriter.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ghostwriter*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
