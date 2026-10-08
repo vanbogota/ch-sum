@@ -75,3 +75,9 @@ def test_compute_send_time_quiet_hours_queues_until_morning():
 def test_typing_seconds_bounds():
     assert typing_seconds("hi") == 2.0
     assert typing_seconds("x" * 10_000) == 25.0
+
+
+def test_ids_optional_until_run():
+    s = make_settings(vladimir_tg_id="", owner_tg_id="")
+    assert s.vladimir_tg_id == 0 and set(s.missing_for_run()) == {"OWNER_TG_ID", "VLADIMIR_TG_ID", "ANTHROPIC_API_KEY"}
+    assert make_settings(anthropic_api_key="k").missing_for_run() == []

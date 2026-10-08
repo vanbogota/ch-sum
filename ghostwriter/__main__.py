@@ -88,6 +88,8 @@ def main() -> None:
     if args.cmd == "run":
         from .app import run
 
+        if missing := get_settings().missing_for_run():
+            sys.exit(f"Fill in .env first: {', '.join(missing)} (chat ids: `python -m ghostwriter chats`)")
         try:
             asyncio.run(run(get_settings()))
         except KeyboardInterrupt:

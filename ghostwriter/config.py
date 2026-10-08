@@ -46,10 +46,10 @@ class Settings(BaseSettings):
 
     # Control bot
     control_bot_token: SecretStr
-    owner_tg_id: int
+    owner_tg_id: int = 0
 
     # Contact
-    vladimir_tg_id: int
+    vladimir_tg_id: int = 0  # required for `run`; `login`/`chats` work without it
     tg_chat: str | None = None
     owner_name: str = "Ivan"
     contact_name: str = "Vladimir"
@@ -88,6 +88,17 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
+
+    @field_validator("owner_tg_id", "vladimir_tg_id", mode="before")
+    @classmethod
+    def _empty_to_zero(cls, v: object) -> object:
+        return 0 if isinstance(v, str) and not v.strip() else v
+
+    def missing_for_run(self) -> list[str]:
+        missing = [name for name, value in (("OWNER_TG_ID", self.owner_tg_id), ("VLADIMIR_TG_ID", self.vladimir_tg_id)) if not value]
+        if not self.anthropic_api_key:
+            missing.append("ANTHROPIC_API_KEY")
+        return missing
 
     @field_validator("active_hours")
     @classmethod
