@@ -80,8 +80,12 @@ class Settings(BaseSettings):
     active_hours: str = "09:00-23:00"
     reply_delay_seconds: str = "60-600"
     debounce_seconds: int = 30
-    history_limit: int = 40
-    style_sample_size: int = 40
+    # Prompt size for drafts (the main token cost): see README "Расход токенов"
+    history_limit: int = 15            # messages of context before the ones being answered
+    style_sample_size: int = 15        # owner's recent hand-typed messages as style reference
+    reply_batch_limit: int = 6         # at most this many newest unanswered messages are answered at once
+    draft_message_chars: int = 700     # long messages / forwarded posts are cut to this in draft prompts
+    escalation_history: int = 8        # context messages for the sensitive-topic check
     backfill_on_start: int = 200
     auto_mode: bool = False
     log_level: str = "INFO"

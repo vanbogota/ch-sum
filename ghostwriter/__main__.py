@@ -101,7 +101,7 @@ def main() -> None:
     b.add_argument("--limit", type=int, default=1000)
     b.add_argument("--chat", help="chat id or @username (default: the .env contact)")
     e = sub.add_parser("export-examples", help="write your real messages to persona/examples.md")
-    e.add_argument("--limit", type=int, default=150)
+    e.add_argument("--limit", type=int, default=40)
     e.add_argument("--out")
     args = p.parse_args()
 

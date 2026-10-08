@@ -114,8 +114,9 @@ class Ghostwriter:
         self.chats = chats
         tz = settings.tz
         o, c = settings.owner_name, settings.contact_name
-        self.escalation = EscalationChecker(llm, persona.categories, tz, o, c)
-        self.drafter = Drafter(llm, persona, tz, o, c)
+        chars = settings.draft_message_chars
+        self.escalation = EscalationChecker(llm, persona.categories, tz, o, c, max_chars=chars)
+        self.drafter = Drafter(llm, persona, tz, o, c, max_chars=chars)
         self.analyst = Analyst(llm, tz, o, c)
         self.hours = ActiveHours(*settings.active_window, tz)
         self.queue = SendQueue(self.deliver)
@@ -354,15 +355,19 @@ class Ghostwriter:
             if not new:
                 return None
             source = new[-1]
-            history, style = await self._context(new, self.scope_for(contact))
+            # Answer only the newest few; older unanswered ones stay in the history as context.
+            batch = new[-self.settings.reply_batch_limit :]
+            history, style = await self._context(batch, self.scope_for(contact))
             name = self.display_name(contact)
 
-            decision = await self.escalation.check(new, history, contact_name=name)
+            decision = await self.escalation.check(
+                batch, history[-self.settings.escalation_history :], contact_name=name
+            )
             if decision.escalate:
                 return await self._escalate(source, new, f"{decision.category or 'sensitive'}: {decision.reason}")
 
             result = await self.drafter.draft(
-                source=source, new_messages=new, history=history, style_samples=style,
+                source=source, new_messages=batch, history=history, style_samples=style,
                 contact_name=name, contact_notes=self.persona.contact_notes(contact.chat_id),
             )
             if result.escalate:
@@ -408,7 +413,8 @@ class Ghostwriter:
         last_out = await self.store.last_outgoing_before(source.channel, source.chat_id, source.timestamp)
         since = last_out.timestamp if last_out else source.timestamp - timedelta(days=1)
         msgs = await self.store.find_messages(
-            direction=Direction.IN, since=since, limit=20, scope=[(source.channel, source.chat_id)]
+            direction=Direction.IN, since=since, limit=self.settings.reply_batch_limit,
+            scope=[(source.channel, source.chat_id)],
         )
         only_contact = self._is_contact_chat(ref) and bool(ref.user_id)
         batch = [
