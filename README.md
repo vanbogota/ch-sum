@@ -186,11 +186,15 @@ docker compose run --rm ghostwriter mcp-sessions               # who is connecte
 docker compose run --rm ghostwriter mcp-sessions --revoke-all  # log everyone out
 ```
 
-**Update after changes in the repository**
+**Update after changes in the repository** — automatic after a merge to `main` once
+[automatic deploys](#automatic-deploys-github-actions) are set up. By hand:
 ```bash
-cd ~/ch-sum && git pull && docker compose --profile https up -d --build
+cd ~/ch-sum && deploy/deploy.sh                 # pull the latest image from ghcr.io and restart
+cd ~/ch-sum && git pull && docker compose --profile https up -d --build   # or build on the server
 ```
 Always pass `--profile https`, otherwise Caddy (HTTPS) is not started.
+
+**Roll back** to an earlier version (any commit of `main` that was built): `deploy/deploy.sh <commit sha>`.
 
 **Logs and status**
 ```bash
@@ -211,6 +215,46 @@ curl https://<MCP_DOMAIN>/health         # should print "ok"
   while the bot was down; it is harmless.
 - Oracle Cloud: ports 80/443 must be open both in the subnet's Security List and in the OS firewall
   (`iptables`), and a 1 GB machine needs swap for `docker compose build`.
+
+## Automatic deploys (GitHub Actions)
+
+`.github/workflows/deploy.yml` runs on every pull request (tests) and on every push to `main`:
+
+1. **test** — `pytest`; if it fails nothing is built or deployed;
+2. **build** — builds the Docker image on GitHub's runners and pushes it to
+   `ghcr.io/vanbogota/ch-sum` with the tags `latest` and `<commit sha>`;
+3. **deploy** — connects to the server over SSH and runs `deploy/deploy.sh <commit sha>`:
+   `git pull`, `docker compose pull`, `up -d`, then waits for `/health`.
+
+The server only downloads the ready image (seconds) instead of building it (minutes on a 1 GB VM).
+
+**One-time setup**
+
+1. *On the server* — create a deploy key that can **only** run `deploy/deploy.sh`:
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C github-deploy -f ~/.ssh/github_deploy
+   echo "command=\"$HOME/ch-sum/deploy/deploy.sh\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty $(cat ~/.ssh/github_deploy.pub)" >> ~/.ssh/authorized_keys
+   cat ~/.ssh/github_deploy        # copy the whole output, including the BEGIN/END lines
+   rm ~/.ssh/github_deploy ~/.ssh/github_deploy.pub   # the private key must not stay on the server
+   ```
+2. *On your computer* — get the server's host key: `ssh-keyscan -t ed25519 <server IP>`.
+3. *On GitHub* — **Settings → Secrets and variables → Actions → New repository secret**:
+
+   | Secret | Value |
+   |---|---|
+   | `DEPLOY_HOST` | server IP |
+   | `DEPLOY_USER` | `ubuntu` |
+   | `DEPLOY_SSH_KEY` | private key from step 1 |
+   | `DEPLOY_KNOWN_HOSTS` | the line from step 2 |
+
+4. Run the workflow once (**Actions → CI / Deploy → Run workflow**, or merge anything to `main`).
+   The build creates the package `ch-sum`; make it public so the server can pull it without a login:
+   your GitHub profile → **Packages → ch-sum → Package settings → Change visibility → Public**.
+   The image contains only code — `.env`, the Telegram session and the persona stay on the server.
+   Then re-run the failed deploy job.
+
+Without `DEPLOY_HOST` the deploy job is skipped, so forks and PRs only run the tests.
+Revoke the deploy key by deleting its line (`github-deploy`) from `~/.ssh/authorized_keys`.
 
 ## Расход токенов
 
