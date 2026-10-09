@@ -1,5 +1,8 @@
 services:
   ghostwriter:
+    # Prebuilt by GitHub Actions (.github/workflows/deploy.yml). IMAGE_TAG pins a commit; default latest.
+    # `docker compose up -d --build` still builds locally from the Dockerfile.
+    image: ghcr.io/vanbogota/ch-sum:${IMAGE_TAG:-latest}
     build: .
     restart: unless-stopped
     env_file: .env
