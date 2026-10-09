@@ -78,6 +78,14 @@ def keyboard(draft: Draft) -> InlineKeyboardMarkup | None:
     return b.as_markup()
 
 
+async def _ack(q: CallbackQuery, text: str | None = None, show_alert: bool = False) -> None:
+    """Answer a button press. Presses delivered late (e.g. while the bot was down) can't be answered: ignore."""
+    try:
+        await q.answer(text, show_alert=show_alert)
+    except TelegramBadRequest as exc:
+        log.debug("callback answer skipped: %s", exc)
+
+
 class ControlBot:
     def __init__(self, settings: Settings, core: Ghostwriter) -> None:
         self.settings = settings
@@ -278,7 +286,7 @@ class ControlBot:
         await self._pick(m, "chat", command.args)
 
     async def on_select(self, q: CallbackQuery, callback_data: SelectCb) -> None:
-        await q.answer("Переключаю…")
+        await _ack(q, "Переключаю…")
         try:
             ref = self._choices.get(callback_data.chat_id) or await self.core.chat_by_id(callback_data.chat_id)
             text = await self._select(callback_data.target, ref)
@@ -293,7 +301,7 @@ class ControlBot:
         await self.info(text)
 
     async def on_page(self, q: CallbackQuery, callback_data: PageCb) -> None:
-        await q.answer()
+        await _ack(q)
         try:
             refs, more = await self._page(callback_data.target, callback_data.offset)
         except ActionError as exc:
@@ -394,16 +402,16 @@ class ControlBot:
             if action == "send":
                 d = await self.core.approve(draft_id)
                 when = d.scheduled_at.astimezone(self.tz).strftime("%H:%M") if d.scheduled_at else ""
-                await q.answer(f"В очереди, отправка ≈ {when}")
+                await _ack(q, f"В очереди, отправка ≈ {when}")
             elif action == "now":
                 await self.core.send_now(draft_id)
-                await q.answer("Отправляю…")
+                await _ack(q, "Отправляю…")
             elif action == "skip":
                 await self.core.skip(draft_id)
-                await q.answer("Пропущено")
+                await _ack(q, "Пропущено")
             elif action == "edit":
                 self.awaiting_edit = draft_id
-                await q.answer()
+                await _ack(q)
                 await self.bot.send_message(
                     self.owner,
                     f"Пришли текст для черновика #{draft_id} — отправлю как есть. /cancel — отмена.",
@@ -411,13 +419,13 @@ class ControlBot:
                     parse_mode=None,
                 )
             elif action == "regen":
-                await q.answer("Пишу новый вариант…")
+                await _ack(q, "Пишу новый вариант…")
                 async with ChatActionSender.typing(bot=self.bot, chat_id=self.owner):
                     await self.core.regenerate(draft_id)
             else:
-                await q.answer("?")
+                await _ack(q, "?")
         except ActionError as exc:
-            await q.answer(str(exc), show_alert=True)
+            await _ack(q, str(exc), show_alert=True)
         except LLMError as exc:
             await self.info(f"⚠️ Claude: {exc}")
 
