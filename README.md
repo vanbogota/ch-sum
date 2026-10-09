@@ -167,6 +167,51 @@ claude.ai / claude.com или localhost (Claude Code, Desktop). После 5 н�
 
 Ответы инструментов содержат переписку — она попадает в чат с Claude и расходует лимиты подписки.
 
+## Operations cheat sheet (server)
+
+Run these on the server, in the project folder (`cd ~/ch-sum`).
+
+**Using the connector**
+- The `Telegram` connector added on claude.ai also appears in the Claude mobile app — no second login.
+  Enable it in a chat via the tools menu.
+- Test sending safely first: ask Claude to send a test message to your own *Saved Messages*
+  (chat_id = your own Telegram user id). The app asks you to confirm every `send_message` call.
+- Everything Claude reads through the connector counts against your subscription limits and stays in
+  the claude.ai chat history. For big groups ask for a period ("last 24 hours", "this week"),
+  not "the whole history".
+
+**Connected clients (OAuth)**
+```bash
+docker compose run --rm ghostwriter mcp-sessions               # who is connected
+docker compose run --rm ghostwriter mcp-sessions --revoke-all  # log everyone out
+```
+
+**Update after changes in the repository**
+```bash
+cd ~/ch-sum && git pull && docker compose --profile https up -d --build
+```
+Always pass `--profile https`, otherwise Caddy (HTTPS) is not started.
+
+**Logs and status**
+```bash
+docker compose ps                        # both containers should be "Up"
+docker compose logs -f ghostwriter       # follow logs, Ctrl+C to stop
+curl https://<MCP_DOMAIN>/health         # should print "ok"
+```
+
+**After editing `.env`:** `docker compose --profile https up -d --force-recreate`
+(`docker compose restart` does not pick up `.env` changes).
+
+**Gotchas**
+- `sqlite3.OperationalError: unable to open database file` — the container runs as uid 1000 and
+  can't write the mounted folders: `sudo chown -R 1000:1000 data secrets persona`.
+- Run the bot in **one place only**. Two copies with the same bot token / Telegram session fight over
+  updates — stop the local copy (`docker compose down`) when the server one runs.
+- A traceback ending in `query is too old and response timeout expired` means a button was pressed
+  while the bot was down; it is harmless.
+- Oracle Cloud: ports 80/443 must be open both in the subnet's Security List and in the OS firewall
+  (`iptables`), and a 1 GB machine needs swap for `docker compose build`.
+
 ## Расход токенов
 
 Дороже всего черновики: в промпт идут персона, `examples.md`, твои недавние сообщения (стиль),
