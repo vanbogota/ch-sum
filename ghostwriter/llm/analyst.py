@@ -23,7 +23,7 @@ ROUTE_SCHEMA = {
             "type": ["string", "null"],
             "description": "A chat, group or person named as the TARGET of the request (e.g. 'в группе Работа' -> "
             "'Работа', 'чат с Петей' -> 'Петя'), in nominative case. Null if no chat is named. "
-            "Not the same as author: 'саммари от Володи' has author, no chat.",
+            "Not the same as author: 'саммари от Маши' has author, no chat.",
         },
         "author": {
             "type": ["string", "null"],
@@ -65,7 +65,7 @@ class Analyst:
             f"and can summarise them, answer questions about them, or draft a reply in {self.owner_name}'s style. "
             "Requests may be in Russian or English. "
             f"'me'/'мои'/'я' refers to {self.owner_name}. Known chat participants: {', '.join(participants) or 'unknown'}; "
-            "map author names and their inflected forms (e.g. 'от Володи' -> Vladimir) to one of them. JSON only."
+            "map author names and their inflected forms (e.g. 'от Маши' -> Maria) to one of them. JSON only."
         )
         r = await self.llm.json(system, command, ROUTE_SCHEMA, max_tokens=800, purpose="route")
         limit = r.get("limit")

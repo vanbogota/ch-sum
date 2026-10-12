@@ -135,7 +135,7 @@ class Ghostwriter:
         """Restore the selected contact / current chat; fall back to the .env defaults."""
         if raw := await self.store.kv_get(KV_CONTACT):
             self.contact = ChatRef.loads(raw)
-        elif self.settings.vladimir_tg_id:
+        elif self.settings.contact_tg_id:
             self.contact = await self._default_contact()
         if raw := await self.store.kv_get(KV_CURRENT):
             self.current = ChatRef.loads(raw)
@@ -145,7 +145,7 @@ class Ghostwriter:
         log.info("contact: %s; current chat: %s", self.contact and self.contact.chat_id, self.current and self.current.chat_id)
 
     async def _default_contact(self) -> ChatRef:
-        uid = self.settings.vladimir_tg_id
+        uid = self.settings.contact_tg_id
         fallback = ChatRef(uid, self.settings.contact_name, "user", uid)
         if self.chats is None:
             return fallback
@@ -189,22 +189,22 @@ class Ghostwriter:
         return bool(
             ref is not None
             and Channel.EMAIL in self.senders
-            and self.settings.vladimir_email
-            and ref.user_id == self.settings.vladimir_tg_id
+            and self.settings.contact_email
+            and ref.user_id == self.settings.contact_tg_id
         )
 
     def scope_for(self, ref: ChatRef | None) -> list[tuple[str, str]]:
         if ref is None:
             return []
         scope = [(Channel.TELEGRAM.value, str(ref.chat_id))]
-        if self._email_belongs_to(ref) and self.settings.vladimir_email:
-            scope.append((Channel.EMAIL.value, self.settings.vladimir_email.lower()))
+        if self._email_belongs_to(ref) and self.settings.contact_email:
+            scope.append((Channel.EMAIL.value, self.settings.contact_email.lower()))
         return scope
 
     def display_name(self, ref: ChatRef) -> str:
         if ref.is_private:
             return ref.title
-        if ref.user_id and ref.user_id == self.settings.vladimir_tg_id:
+        if ref.user_id and ref.user_id == self.settings.contact_tg_id:
             return f"{self.settings.contact_name} (group «{ref.title}»)"
         return f"the group chat «{ref.title}»"
 
@@ -213,8 +213,8 @@ class Ghostwriter:
             return None
         if channel == Channel.TELEGRAM and self.contact.user_id:
             return str(self.contact.user_id)
-        if channel == Channel.EMAIL and self._email_belongs_to(self.contact) and self.settings.vladimir_email:
-            return self.settings.vladimir_email.lower()
+        if channel == Channel.EMAIL and self._email_belongs_to(self.contact) and self.settings.contact_email:
+            return self.settings.contact_email.lower()
         return None
 
     def contact_chat_id(self, channel: str) -> str | None:
@@ -222,8 +222,8 @@ class Ghostwriter:
             return None
         if channel == Channel.TELEGRAM:
             return str(self.contact.chat_id)
-        if channel == Channel.EMAIL and self._email_belongs_to(self.contact) and self.settings.vladimir_email:
-            return self.settings.vladimir_email.lower()
+        if channel == Channel.EMAIL and self._email_belongs_to(self.contact) and self.settings.contact_email:
+            return self.settings.contact_email.lower()
         return None
 
     def is_contact(self, msg: Message) -> bool:

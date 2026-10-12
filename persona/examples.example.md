@@ -1,8 +1,8 @@
 # Style examples (copy to `examples.md` — it is gitignored)
-# Paste real messages you sent to Vladimir, one per line or block.
-# `python -m ghostwriter export-examples` can generate this from Telegram history.
+# Paste 20–40 real messages you wrote, one per line or block. This file goes into every draft,
+# so keep it short. `python -m ghostwriter export-examples` can generate it from your history.
 
-- ахах, да, помню этот позор 😅
-- слушай, пока завал, но на выходных гляну
-- ну такое. я бы не стал
-- норм, сам как?
+- haha yes, I remember that disaster 😅
+- swamped right now, will take a look on the weekend
+- meh. I wouldn't
+- all good, you?

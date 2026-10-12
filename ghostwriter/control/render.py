@@ -27,7 +27,7 @@ _FROM = {"from", "от", "by"}
 
 
 def parse_summary_args(args: str | None) -> SummaryRequest:
-    """`/summary 50 from Vladimir 24h about work` -> SummaryRequest(limit=50, author='Vladimir', since_hours=24, focus='about work')."""
+    """`/summary 50 from Alice 24h about work` -> SummaryRequest(limit=50, author='Alice', since_hours=24, focus='about work')."""
     req = SummaryRequest()
     tokens = (args or "").split()
     focus: list[str] = []

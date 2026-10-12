@@ -28,7 +28,7 @@ class LLM:
         client: anthropic.AsyncAnthropic | None = None,
     ) -> None:
         self.model = model
-        # Through a gateway, label each request with its purpose (LiteLLM turns tags into Langfuse trace tags).
+        # Through a gateway, label each request with its purpose so the gateway's logs/traces can be filtered by it.
         self.tag_requests = bool(base_url)
         # An empty ANTHROPIC_BASE_URL in the environment would override the SDK default with "".
         if not os.environ.get("ANTHROPIC_BASE_URL", "x").strip():

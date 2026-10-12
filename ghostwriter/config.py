@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,31 +33,34 @@ def parse_hours(value: str) -> tuple[time, time]:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True
+    )
 
     # Claude
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-sonnet-5"
-    # Optional proxy/gateway (e.g. LiteLLM). Empty = Anthropic API directly.
+    # Optional Anthropic-compatible gateway / proxy. Empty = Anthropic API directly.
     anthropic_base_url: str | None = None
 
     # Telegram userbot
     tg_api_id: int
     tg_api_hash: SecretStr
-    tg_session_path: Path = Path("./secrets/ivan.session")
+    tg_session_path: Path = Path("./secrets/telegram.session")
 
     # Control bot (optional when only the MCP connector is used)
     control_bot_token: SecretStr | None = None
     owner_tg_id: int = 0
 
     # Contact
-    vladimir_tg_id: int = 0  # default contact; can be changed in the bot with /contact
+    # Default contact (CONTACT_TG_ID; the older name VLADIMIR_TG_ID still works). Can be changed with /contact.
+    contact_tg_id: int = Field(0, validation_alias=AliasChoices("contact_tg_id", "vladimir_tg_id"))
     tg_chat: str | None = None
-    owner_name: str = "Ivan"
-    contact_name: str = "Vladimir"
+    owner_name: str = "Owner"
+    contact_name: str = "Contact"
 
     # Email
-    vladimir_email: str | None = None
+    contact_email: str | None = Field(None, validation_alias=AliasChoices("contact_email", "vladimir_email"))
     imap_host: str | None = None
     imap_port: int = 993
     imap_user: str | None = None
@@ -120,12 +123,12 @@ class Settings(BaseSettings):
     def _empty_secret_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
-    @field_validator("mcp_domain", "mcp_public_url", "anthropic_base_url", "tg_chat", "vladimir_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
+    @field_validator("mcp_domain", "mcp_public_url", "anthropic_base_url", "tg_chat", "contact_email", "imap_host", "smtp_host", "email_from", "imap_sent_folder", mode="before")
     @classmethod
     def _empty_to_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
-    @field_validator("owner_tg_id", "vladimir_tg_id", mode="before")
+    @field_validator("owner_tg_id", "contact_tg_id", mode="before")
     @classmethod
     def _empty_to_zero(cls, v: object) -> object:
         return 0 if isinstance(v, str) and not v.strip() else v
@@ -195,13 +198,13 @@ class Settings(BaseSettings):
     def watched_chat(self) -> str | int:
         """Telegram chat to watch: TG_CHAT if set, else the private chat with the contact."""
         if self.tg_chat is None:
-            return self.vladimir_tg_id
+            return self.contact_tg_id
         chat = self.tg_chat.strip()
         return int(chat) if chat.lstrip("-").isdigit() else chat
 
     @property
     def email_enabled(self) -> bool:
-        return bool(self.imap_host and self.smtp_host and self.vladimir_email)
+        return bool(self.imap_host and self.smtp_host and self.contact_email)
 
     @property
     def email_sender(self) -> str | None:

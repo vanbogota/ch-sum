@@ -39,7 +39,7 @@ def test_settings_validation():
 
 def test_email_enabled_requires_all():
     assert not make_settings(imap_host="imap.x").email_enabled
-    assert make_settings(imap_host="imap.x", smtp_host="smtp.x", vladimir_email="v@x.org").email_enabled
+    assert make_settings(imap_host="imap.x", smtp_host="smtp.x", contact_email="v@x.org").email_enabled
 
 
 def test_active_hours_simple():
@@ -89,3 +89,15 @@ def test_run_requirements_by_mode():
     assert make_settings(control_bot_token="", anthropic_api_key="").missing_for_run() == [
         "CONTROL_BOT_TOKEN or MCP_ENABLED=true"
     ]
+
+
+def test_contact_env_names(monkeypatch):
+    from ghostwriter.config import Settings
+
+    base = dict(tg_api_id=1, tg_api_hash="h")
+    monkeypatch.setenv("VLADIMIR_TG_ID", "42")  # old name keeps working
+    monkeypatch.setenv("VLADIMIR_EMAIL", "a@b.c")
+    s = Settings(_env_file=None, **base)
+    assert (s.contact_tg_id, s.contact_email) == (42, "a@b.c")
+    monkeypatch.setenv("CONTACT_TG_ID", "7")
+    assert Settings(_env_file=None, **base).contact_tg_id == 7

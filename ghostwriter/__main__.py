@@ -59,10 +59,10 @@ async def cmd_backfill(limit: int, chat: str | None) -> None:
     target: int | str
     if chat:
         target = int(chat) if chat.lstrip("-").isdigit() else chat
-    elif s.vladimir_tg_id:
+    elif s.contact_tg_id:
         target = s.watched_chat
     else:
-        sys.exit("Pass --chat <id or @username> (see `chats`) or set VLADIMIR_TG_ID.")
+        sys.exit("Pass --chat <id or @username> (see `chats`) or set CONTACT_TG_ID.")
     ref = await tg.chat_ref(target)
     created = await tg.backfill(ref.chat_id, limit)
     print(f"{ref.title}: imported {len(created)} new messages.")
