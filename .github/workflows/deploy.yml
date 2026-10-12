@@ -5,7 +5,7 @@
 #   DEPLOY_HOST         server IP or name
 #   DEPLOY_USER         SSH user (e.g. ubuntu)
 #   DEPLOY_SSH_KEY      private key of the deploy key (see README, "Automatic deploys")
-#   DEPLOY_KNOWN_HOSTS  output of `ssh-keyscan -t ed25519 <DEPLOY_HOST>`
+#   DEPLOY_KNOWN_HOSTS  one line "<DEPLOY_HOST> ssh-ed25519 AAAA..." (see README)
 # Without DEPLOY_HOST the deploy job is skipped (tests and image build still run).
 
 name: CI / Deploy

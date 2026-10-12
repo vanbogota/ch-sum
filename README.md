@@ -204,9 +204,13 @@ One-time setup:
    cat ~/.ssh/github_deploy        # copy the whole output, including the BEGIN/END lines
    rm ~/.ssh/github_deploy ~/.ssh/github_deploy.pub
    ```
-2. *On your computer* — `ssh-keyscan -t ed25519 <server IP>`.
+2. *On the server* — the host key line for `DEPLOY_KNOWN_HOSTS` (works everywhere; `ssh-keyscan`
+   from an older Windows OpenSSH fails with `unsupported KEX method`):
+   ```bash
+   echo "$(curl -s ifconfig.me) $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+   ```
 3. *On GitHub* — **Settings → Secrets and variables → Actions**: `DEPLOY_HOST` (server IP),
-   `DEPLOY_USER` (e.g. `ubuntu`), `DEPLOY_SSH_KEY` (step 1), `DEPLOY_KNOWN_HOSTS` (step 2).
+   `DEPLOY_USER` (e.g. `ubuntu`), `DEPLOY_SSH_KEY` (step 1), `DEPLOY_KNOWN_HOSTS` (step 2, one line `<IP> ssh-ed25519 AAAA…`).
 4. After the first build make the package public (**Packages → <repo> → Package settings → Change
    visibility**) so the server can pull it without a login, and re-run the deploy job. The image
    contains only code; `.env`, the session and the persona stay on the server.
