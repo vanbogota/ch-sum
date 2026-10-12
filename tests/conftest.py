@@ -21,7 +21,7 @@ def make_settings(**overrides: Any) -> Settings:
         control_bot_token="123:abc",
         anthropic_api_key="test-key",
         owner_tg_id=100,
-        vladimir_tg_id=200,
+        contact_tg_id=200,
         persona_dir=ROOT / "persona",
         database_url="sqlite+aiosqlite:///:memory:",
         debounce_seconds=0,

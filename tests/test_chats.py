@@ -135,7 +135,7 @@ async def test_manual_reply_in_group_does_not_touch_contact_drafts(env, store):
 
 
 async def test_no_contact_configured(store, persona):
-    core = Ghostwriter(make_settings(vladimir_tg_id=""), store, persona, FakeLLM(), {})
+    core = Ghostwriter(make_settings(contact_tg_id=""), store, persona, FakeLLM(), {})
     await core.load_state()
     assert core.contact is None and core.current is None
     with pytest.raises(ActionError):

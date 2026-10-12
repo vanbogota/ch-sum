@@ -136,7 +136,7 @@ class EmailGateway:
             raise ValueError("email is not configured")
         self.settings = settings
         self.store = store
-        self.contact = (settings.vladimir_email or "").lower()
+        self.contact = (settings.contact_email or "").lower()
         self.on_message: OnMessage | None = None
 
     # ------------------------------------------------------------------ IMAP

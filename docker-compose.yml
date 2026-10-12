@@ -1,5 +1,8 @@
 services:
   ghostwriter:
+    # Prebuilt by GitHub Actions (.github/workflows/deploy.yml). IMAGE_TAG pins a commit; default latest.
+    # `docker compose up -d --build` still builds locally from the Dockerfile.
+    image: ghcr.io/vanbogota/ch-sum:${IMAGE_TAG:-latest}
     build: .
     restart: unless-stopped
     env_file: .env
@@ -10,12 +13,12 @@ services:
     # MCP connector port, reachable only from this machine (Caddy / a tunnel publishes it).
     ports:
       - "127.0.0.1:8765:8765"
-    # Lets the container reach services published on the host (e.g. LiteLLM on :4000)
+    # Lets the container reach services published on the host (e.g. an LLM gateway on :4000)
     # as http://host.docker.internal:4000, on Linux too.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Alternative: join the LiteLLM compose network and use http://litellm:4000
-    # networks: [default, litellm]
+    # Alternative: join the gateway's compose network and use http://<service>:<port>
+    # networks: [default, gateway]
     # First run (interactive Telegram login):
     #   docker compose run --rm ghostwriter login
 
@@ -39,6 +42,6 @@ volumes:
   caddy_data:
 
 # networks:
-#   litellm:
+#   gateway:
 #     external: true
-#     name: litellm_default   # see `docker network ls`
+#     name: gateway_default   # see `docker network ls`

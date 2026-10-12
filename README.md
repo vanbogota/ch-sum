@@ -1,279 +1,312 @@
-# Ghostwriter: ассистент для переписки в Telegram и почте
+# Ghostwriter
 
-Ассистент подключается к **твоему** аккаунту Telegram (userbot на Telethon), читает выбранные чаты
-и по командам делает:
+**An AI assistant for your personal Telegram account.** It reads the chats you choose, summarises
+them, answers questions about them and drafts replies that sound like you — and nothing is ever sent
+without your approval.
 
-- **саммари**: «саммари последних сообщений от Владимира», «саммари группы Работа за день», `/summary 50 from Vladimir`
-- **ответ в твоём стиле**: «ответь в моем стиле», «ответь в моем стиле, вежливо откажись», `/reply`
-- **вопросы по переписке**: «о чём мы договорились про поездку?», `/ask ...`
+It can be used in two ways, separately or together:
 
-Чаты выбираются прямо в боте:
-- **собеседник** (`/contact`): человек, на чьи новые сообщения ассистент сам готовит черновики;
-- **текущий чат** (`/chat`): любой чат или группа, по которым делаются саммари, вопросы и «ответь в моем стиле».
-  Черновики на сообщения собеседника при этом продолжают приходить. Чат можно назвать и прямо в
-  запросе: «саммари группы Работа за день» — текущий чат при этом не меняется.
+- **Control bot** — a private Telegram bot that watches one contact for you: when they write, it
+  prepares a draft in your style and asks you *Send / Edit / Skip / Regenerate*. It also does
+  summaries and questions on request. Needs an Anthropic API key.
+- **Connector for the Claude apps** — an MCP server that lets Claude (claude.ai, the mobile app,
+  Claude Desktop, Claude Code) read your chats and send messages as you, while you talk to Claude as
+  usual: *"what did Sam want from me this week? — draft a reply in my style — send it"*.
+  Runs on your Claude subscription, no API key needed.
 
-На новые сообщения собеседника он сам готовит черновик. Ничего не отправляется без твоего
-подтверждения: черновик приходит в отдельный приватный бот-пульт с кнопками
-**Отправить / Изменить / Пропустить / Заново**. Чувствительные темы (деньги, встречи и даты,
-тяжёлые разговоры, вопрос «ты бот?») не черновикуются, по ним приходит только уведомление.
+Your Telegram session, messages and notes stay on your own server.
 
-Почта (IMAP/SMTP) опциональна и привязана к собеседнику из `.env` (`VLADIMIR_TG_ID` + `VLADIMIR_EMAIL`): для него история Telegram и почты общая.
+## Features
 
-## Как это устроено
+- **Summaries** of any chat or group, for a period, from a specific person, or on a topic.
+- **Questions about a conversation** — "what did we agree about the trip?".
+- **Replies in your voice** — style learned from your real messages plus notes you write about
+  yourself and about each person.
+- **Human in the loop** — drafts are sent only after you approve them; the Claude app asks before
+  every send.
+- **Sensitive topics are not drafted** — money, meetings and dates, heavy or conflict topics and
+  "are you a bot?" are escalated to you instead (configurable).
+- **Natural timing** — random delay, "typing…" indicator, quiet hours.
+- **Optional email channel** (IMAP/SMTP) for the default contact, threaded with the Telegram history.
+
+## How it works
 
 ```
-Telethon (твой аккаунт) ─┐                                   ┌─> Telethon: «печатает…» + отправка
-                         ├─> SQLite ─> проверка на эскалацию ─> черновик (Claude) ─> бот-пульт ─┤
-IMAP (опционально) ──────┘   (общая история)                                     (ты решаешь)   └─> SMTP с заголовками треда
+                 ┌──────────────── your server ────────────────────────────────┐
+Telegram  ◀────▶ │  userbot (your account)  ──▶  message store (SQLite)        │
+                 │        ▲                          │                         │
+                 │        │ send                     ▼                         │
+                 │  control bot  ◀── drafts ── Claude API (needs a key)        │ ◀──▶  you, in Telegram
+                 │        ▲                                                    │
+                 │        └── MCP server (OAuth) ◀─────────────────────────────┼──── Claude apps
+                 └─────────────────────────────────────────────────────────────┘     (your subscription)
 ```
 
-| Модуль | Что делает |
+- The **userbot** (Telethon) is logged into *your* Telegram account. It stores messages of the
+  chats you select and sends approved replies as you.
+- The **control bot** (aiogram) is a separate bot that only answers you. It shows drafts with
+  buttons and accepts commands in plain language.
+- The **MCP server** exposes tools to the Claude apps; access is protected with an OAuth login
+  (your password).
+
+| Module | Responsibility |
 |---|---|
-| `ghostwriter/channels/telegram.py` | слушает чат, импортирует историю, отправляет с «печатает…» |
-| `ghostwriter/channels/email.py` | IMAP-опрос (входящие + отправленные), SMTP с `In-Reply-To`/`References` |
-| `ghostwriter/storage/` | SQLAlchemy async: `messages`, `drafts`, `kv`. SQLite, заменяется на Postgres через `DATABASE_URL` |
-| `ghostwriter/llm/escalation.py` | классификатор чувствительных тем: сначала regex-подсказки, решает Claude |
-| `ghostwriter/llm/drafter.py` | черновик в твоём стиле: `persona/` + твои реальные сообщения + история |
-| `ghostwriter/llm/analyst.py` | саммари, ответы на вопросы, разбор команд на естественном языке |
-| `ghostwriter/control/bot.py` | бот-пульт на aiogram, отвечает **только** `OWNER_TG_ID` |
-| `ghostwriter/scheduling.py` | тихие часы (`ACTIVE_HOURS`, `Europe/Helsinki`) и случайная задержка |
-| `ghostwriter/core.py` | весь поток: сообщение → проверка → черновик → одобрение → отправка по таймеру |
+| `ghostwriter/channels/telegram.py` | reads chats, imports history, searches, sends with "typing…" |
+| `ghostwriter/channels/email.py` | IMAP polling (inbox + sent), SMTP replies with threading headers |
+| `ghostwriter/storage/` | async SQLAlchemy: messages, drafts, key-value state (SQLite or Postgres) |
+| `ghostwriter/llm/` | Claude calls: sensitive-topic check, drafting, summaries, command routing |
+| `ghostwriter/control/` | the control bot: cards, buttons, chat selection |
+| `ghostwriter/core.py` | the flow: message → check → draft → approval → timed send |
+| `ghostwriter/mcp_server.py`, `oauth.py` | the connector for the Claude apps and its login |
+| `ghostwriter/scheduling.py` | quiet hours and send delays |
 
-Несколько сообщений подряд склеиваются (`DEBOUNCE_SECONDS`), и на них пишется один ответ. Если ты
-ответил сам, висящий черновик помечается «заменено». Одобренные сообщения переживают рестарт.
+## Quick start (local)
 
-## Установка
-
-Нужен Python 3.11+.
+Requires Python 3.11+ (or just Docker, see [Deployment](#deployment)).
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env        # заполни
+cp .env.example .env            # fill it in, see below
 ```
 
-1. **API Telegram**: на https://my.telegram.org → API development tools возьми `TG_API_ID` и `TG_API_HASH`.
-2. **Бот-пульт**: создай бота у @BotFather → `CONTROL_BOT_TOKEN`. Свой числовой id (`OWNER_TG_ID`) подскажет, например, @userinfobot. Напиши своему боту `/start`, иначе он не сможет тебе писать.
-3. **Вход в аккаунт** (создаёт `secrets/ivan.session`, спросит телефон, код и пароль 2FA):
+1. **Telegram API credentials** — <https://my.telegram.org> → *API development tools* →
+   `TG_API_ID`, `TG_API_HASH`.
+2. **Control bot** (optional) — create a bot with @BotFather → `CONTROL_BOT_TOKEN`; your numeric
+   user id (e.g. from @userinfobot) → `OWNER_TG_ID`. Open your bot and press **Start**.
+3. **Claude API key** (optional, needed for automatic drafts) → `ANTHROPIC_API_KEY`.
+4. **Log in to your Telegram account** — enter your phone number (not a bot token), the code
+   Telegram sends you and your 2FA password:
    ```bash
    python -m ghostwriter login
    ```
-4. **Собеседник по умолчанию** (необязательно): `python -m ghostwriter chats` покажет id чатов,
-   впиши нужный в `VLADIMIR_TG_ID`. Можно оставить пустым и выбрать собеседника в боте командой `/contact`.
-5. **Персона**:
+5. **Default contact** (optional) — `python -m ghostwriter chats` lists chat ids; put one into
+   `CONTACT_TG_ID`, or choose later in the bot with `/contact`.
+6. **Persona** — see [Your style](#your-style-persona):
    ```bash
-   cp persona/context.example.md persona/context.md      # кто ты и о чём нельзя писать (для всех чатов)
-   python -m ghostwriter backfill --limit 2000            # импорт истории (--chat <id> для другого чата)
-   python -m ghostwriter export-examples                  # твои реальные сообщения → persona/examples.md
+   cp persona/context.example.md persona/context.md
+   python -m ghostwriter backfill --limit 2000      # import history (--chat <id> for another chat)
+   python -m ghostwriter export-examples           # your real messages -> persona/examples.md
    ```
-   О конкретном человеке или группе пиши в `persona/contacts/<id чата>.md` (пример в
-   `persona/contacts/example.md`): кто это тебе, как вы общаетесь. Файл читается при каждом черновике,
-   перезапуск не нужен. Категории эскалации редактируются в `persona/escalation.toml`.
-6. **Запуск**: `python -m ghostwriter run`
+7. **Run:** `python -m ghostwriter run`
 
-### Docker / VPS
+## Your style (persona)
 
-```bash
-mkdir -p data secrets && sudo chown -R 1000:1000 data secrets persona   # контейнер работает от uid 1000
-docker compose run --rm ghostwriter login   # один раз, интерактивно
-docker compose up -d
-```
-Вариант с systemd лежит в `deploy/ghostwriter.service`. Процесс долгоживущий (Telethon держит
-соединение), поэтому serverless не подходит.
-
-## Команды бота-пульта
-
-| | |
+| File | What to put there |
 |---|---|
-| обычный текст | Claude поймёт, что нужно: саммари, ответ, вопрос или смена чата («переключись на чат с Петей») |
-| `/contact [имя]` | выбрать собеседника для автоматических черновиков (без имени покажет список) |
-| `/chat [название]` | выбрать текущий чат или группу для саммари, вопросов и `/reply` |
-| `/summary [N] [24h\|3d] [from Имя] [тема]` | саммари текущего чата |
-| `/reply [указания]` | черновик ответа на последнее входящее в текущем чате |
-| `/ask вопрос` | вопрос по текущему чату |
-| `/pending` | черновики, ждущие решения |
-| `/sync [N]` | подтянуть историю текущего чата |
-| `/status` | модель, каналы, счётчики, тихие часы |
-| `/cancel` | отменить ввод текста для «Изменить» |
+| `persona/context.md` | who you are, how you write, what the assistant must never say or promise — used for every chat |
+| `persona/contacts/<chat id>.md` | who this person or group is to you and how you talk; read on every draft |
+| `persona/examples.md` | 20–40 typical messages of yours (keep it short: it goes into every draft) |
+| `persona/escalation.toml` | sensitive categories and keywords that are escalated instead of drafted |
 
-## Настройки
+On top of that, your most recent hand-typed messages in the chat are used as a style reference.
+All persona files except the examples are gitignored.
 
-Полный список в `.env.example`. Основные:
-- `ANTHROPIC_MODEL`: по умолчанию `claude-sonnet-5`
-- `ACTIVE_HOURS=09:00-23:00`, `TIMEZONE=Europe/Helsinki`: вне этих часов отправка ждёт утра
-- `REPLY_DELAY_SECONDS=60-600`: случайная задержка перед отправкой
-- `AUTO_MODE=false`: если включить, неэскалированные черновики уходят без подтверждения
-  (карточка всё равно приходит, отправку можно отменить)
+## Control bot
 
-## Коннектор для приложения Claude (без API-ключа)
+Write to it in plain language — *"summary of the work group for today"*, *"reply in my style,
+politely decline"*, *"switch to the chat with Sam"* — or use commands:
 
-Ассистент может работать как **MCP-сервер**: тогда переписку читает и черновики пишет Claude в
-приложении (claude.ai, телефон, Claude Desktop, Claude Code) по твоей подписке, а сервер только
-достаёт сообщения из Telegram и отправляет одобренные тобой ответы.
-
-Инструменты, которые получает Claude:
-
-| Инструмент | Что делает |
+| Command | |
 |---|---|
-| `list_chats` | найти чат или группу (поиск по всем чатам) |
-| `get_messages` | сообщения чата за период / последние N / от конкретного человека (свежие из Telegram) |
-| `search_messages` | поиск по всей истории чата |
-| `get_persona` | твой `context.md`, заметки о собеседнике, примеры стиля |
-| `send_message` | отправить от твоего имени (только при `MCP_ALLOW_SEND=true`; приложение Claude спрашивает подтверждение) |
+| `/contact [name]` | choose the person whose messages get automatic drafts |
+| `/chat [name]` | choose the current chat or group for summaries, questions and `/reply` |
+| `/summary [N] [24h\|3d] [from Name] [topic]` | summary of the current chat |
+| `/reply [instructions]` | draft a reply to the latest incoming message in the current chat |
+| `/ask question` | ask about the current chat |
+| `/pending` | drafts waiting for a decision |
+| `/sync [N]` | import more history of the current chat |
+| `/status` | model, channels, counters, quiet hours |
+| `/cancel` | cancel typing a text for *Edit* |
 
-Пример разговора в приложении: «достань переписку с Владимиром за неделю — что он от меня хочет?»
-→ обсуждаешь → «напиши ответ в моём стиле» → правишь → «отправь».
+Every draft card has **Send · Edit · Skip · Regenerate**. *Send* queues the message with a random
+delay (`REPLY_DELAY_SECONDS`) inside active hours (`ACTIVE_HOURS`, `TIMEZONE`); it can still be
+cancelled. A burst of messages gets one reply; if you reply by hand, the pending draft is dropped.
+Drafts for a group show *"To: 👥 group"* — everyone in it will see the reply.
 
-**Настройка:**
-1. Придумай пароль для входа (12+ символов) и получи его хеш:
+## Connector for the Claude apps (MCP)
+
+Tools Claude gets:
+
+| Tool | |
+|---|---|
+| `list_chats` | find a chat or group (searches all chats) |
+| `get_messages` | messages of a chat — for a period, the last N, or from one person |
+| `search_messages` | full-history search in a chat |
+| `get_persona` | your context, notes about the person and style examples |
+| `send_message` | send as you (only with `MCP_ALLOW_SEND=true`; the app asks you to confirm) |
+
+**Setup**
+
+1. Pick a login password (12+ characters, easy to type on a phone) and hash it:
    ```bash
-   docker compose run --rm ghostwriter hash-password
+   docker compose run --rm ghostwriter hash-password     # or: python -m ghostwriter hash-password
    ```
-   В `.env`:
+2. In `.env`:
    ```
    MCP_ENABLED=true
    MCP_AUTH=oauth
-   MCP_PASSWORD_HASH=scrypt:...      # из команды выше
-   MCP_ALLOW_SEND=true               # если нужна отправка из Claude
-   MCP_DOMAIN=203-0-113-7.sslip.io   # IP сервера через дефисы + .sslip.io, или свой домен
+   MCP_PASSWORD_HASH=scrypt:...         # from step 1
+   MCP_ALLOW_SEND=true                  # to allow sending from Claude
+   MCP_DOMAIN=203-0-113-7.sslip.io      # your server's IP with dashes + .sslip.io, or your own domain
    ```
-   `ANTHROPIC_API_KEY` и `CONTROL_BOT_TOKEN` можно оставить пустыми: без ключа нет только
-   автоматических черновиков (они требуют API), без токена бота — бота-пульта.
-2. На сервере открой порты 80 и 443 (на Oracle Cloud — и в Security List, и в файрволе ОС) и запусти
-   с HTTPS-прокси:
+   `ANTHROPIC_API_KEY` and `CONTROL_BOT_TOKEN` may stay empty: without a key there are no
+   automatic drafts, without a token there is no control bot.
+3. Start with HTTPS ([Deployment](#deployment)) and check `curl https://<MCP_DOMAIN>/health` → `ok`.
+4. On claude.ai: **Settings → Connectors → Add custom connector** → `https://<MCP_DOMAIN>/mcp`.
+   A login page on your server opens; enter the password. The connector then also works in the
+   mobile app. For Claude Code: `claude mcp add --transport http telegram https://<MCP_DOMAIN>/mcp`.
+
+**How the login works:** Claude registers as an OAuth client, you enter the password once, and Claude
+gets an access token (1 hour) and a refresh token (30 days, rotated on every use). Tokens are stored
+only as hashes. Only clients that return to claude.ai, claude.com or localhost are accepted.
+Five wrong passwords lock the login for 15 minutes.
+
+Fallback without OAuth: `MCP_AUTH=token`, `MCP_TOKEN=$(openssl rand -hex 24)`, connector URL
+`https://<MCP_DOMAIN>/<MCP_TOKEN>/mcp` — the URL is then the secret, keep it private.
+
+## Deployment
+
+The assistant is a long-running process (it keeps a Telegram connection open), so it needs a small
+always-on server — 1 GB of RAM is enough. Serverless platforms don't fit.
+
+```bash
+git clone https://github.com/vanbogota/ch-sum.git && cd ch-sum
+cp .env.example .env && nano .env
+mkdir -p data secrets persona/contacts && sudo chown -R 1000:1000 data secrets persona   # container user
+docker compose run --rm ghostwriter login        # once, interactive
+docker compose --profile https up -d             # assistant + Caddy (automatic HTTPS)
+```
+
+- The `https` profile starts **Caddy**, which gets a Let's Encrypt certificate for `MCP_DOMAIN` and
+  forwards to the assistant. Ports 80 and 443 must be reachable from the internet.
+- Without the connector, `docker compose up -d` is enough.
+- A systemd unit is in `deploy/ghostwriter.service` if you prefer running without Docker.
+- On small VMs add swap before building images on the server, and open ports both in the cloud
+  provider's firewall and in the OS firewall.
+
+### Automatic deploys (GitHub Actions)
+
+`.github/workflows/deploy.yml` runs on every pull request (tests) and on every push to `main`:
+
+1. **test** — `pytest`; on failure nothing is built or deployed;
+2. **build** — builds the image on GitHub's runners and pushes it to `ghcr.io/<owner>/<repo>`
+   with the tags `latest` and `<commit sha>`;
+3. **deploy** — SSH to the server, `deploy/deploy.sh <commit sha>`: `git pull`, pull the image,
+   restart, wait for `/health`.
+
+One-time setup:
+
+1. *On the server* — a deploy key that can **only** run `deploy/deploy.sh`:
    ```bash
-   docker compose --profile https up -d --build
-   curl https://$MCP_DOMAIN/health        # должно ответить ok
+   ssh-keygen -t ed25519 -N "" -C github-deploy -f ~/.ssh/github_deploy
+   echo "command=\"$HOME/ch-sum/deploy/deploy.sh\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty $(cat ~/.ssh/github_deploy.pub)" >> ~/.ssh/authorized_keys
+   cat ~/.ssh/github_deploy        # copy the whole output, including the BEGIN/END lines
+   rm ~/.ssh/github_deploy ~/.ssh/github_deploy.pub
    ```
-3. На claude.ai: **Settings → Connectors → Add custom connector**, адрес `https://<MCP_DOMAIN>/mcp`.
-   Откроется страница входа на твоём сервере — введи пароль. После этого коннектор доступен и в
-   мобильном приложении. Для Claude Code: `claude mcp add --transport http telegram https://<MCP_DOMAIN>/mcp`,
-   затем `/mcp` → войти.
+2. *On the server* — the host key line for `DEPLOY_KNOWN_HOSTS` (works everywhere; `ssh-keyscan`
+   from an older Windows OpenSSH fails with `unsupported KEX method`):
+   ```bash
+   echo "$(curl -s ifconfig.me) $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+   ```
+3. *On GitHub* — **Settings → Secrets and variables → Actions**: `DEPLOY_HOST` (server IP),
+   `DEPLOY_USER` (e.g. `ubuntu`), `DEPLOY_SSH_KEY` (step 1), `DEPLOY_KNOWN_HOSTS` (step 2, one line `<IP> ssh-ed25519 AAAA…`).
+4. After the first build make the package public (**Packages → <repo> → Package settings → Change
+   visibility**) so the server can pull it without a login, and re-run the deploy job. The image
+   contains only code; `.env`, the session and the persona stay on the server.
 
-**Как устроен вход (OAuth):** Claude регистрируется на сервере как клиент, ты один раз вводишь пароль,
-Claude получает токен доступа на 1 час и токен обновления на 30 дней (меняется при каждом обновлении).
-Токены хранятся в базе только в виде хешей. Принимаются только клиенты, возвращающие на
-claude.ai / claude.com или localhost (Claude Code, Desktop). После 5 неверных паролей вход
-блокируется на 15 минут.
+Without `DEPLOY_HOST` the deploy job is skipped. Revoke the key by deleting its `github-deploy`
+line from `~/.ssh/authorized_keys`.
 
-- Кто подключён: `docker compose run --rm ghostwriter mcp-sessions`
-- Выкинуть всех (придётся войти заново): `docker compose run --rm ghostwriter mcp-sessions --revoke-all`
-- Сменить пароль: новый `hash-password` → `.env` → `docker compose up -d --force-recreate` (уже
-  выданные токены продолжают работать — отзови их командой выше).
+### Operations cheat sheet
 
-Запасной режим без OAuth: `MCP_AUTH=token` и `MCP_TOKEN=<openssl rand -hex 24>`, адрес коннектора
-`https://<MCP_DOMAIN>/<MCP_TOKEN>/mcp` (секрет в адресе — не публикуй его).
+Run on the server in the project folder.
 
-Ответы инструментов содержат переписку — она попадает в чат с Claude и расходует лимиты подписки.
+| Task | Command |
+|---|---|
+| status | `docker compose ps` |
+| logs | `docker compose logs -f ghostwriter` |
+| health | `curl https://<MCP_DOMAIN>/health` |
+| update by hand | `deploy/deploy.sh` (prebuilt image) or `git pull && docker compose --profile https up -d --build` |
+| roll back | `deploy/deploy.sh <commit sha>` |
+| apply `.env` changes | `docker compose --profile https up -d --force-recreate` (`restart` does not reload `.env`) |
+| connected Claude clients | `docker compose run --rm ghostwriter mcp-sessions [--revoke-all]` |
+| change the login password | `hash-password` → `.env` → recreate; revoke sessions if the old one leaked |
 
-## Operations cheat sheet (server)
+Gotchas:
 
-Run these on the server, in the project folder (`cd ~/ch-sum`).
+- `sqlite3.OperationalError: unable to open database file` — the container (uid 1000) can't write
+  the mounted folders: `sudo chown -R 1000:1000 data secrets persona`.
+- Run the assistant in **one place only**: two copies with the same bot token or Telegram session
+  fight over updates.
+- `query is too old and response timeout expired` in the logs — a button was pressed while the bot
+  was down; harmless.
 
-**Using the connector**
-- The `Telegram` connector added on claude.ai also appears in the Claude mobile app — no second login.
-  Enable it in a chat via the tools menu.
-- Test sending safely first: ask Claude to send a test message to your own *Saved Messages*
-  (chat_id = your own Telegram user id). The app asks you to confirm every `send_message` call.
-- Everything Claude reads through the connector counts against your subscription limits and stays in
-  the claude.ai chat history. For big groups ask for a period ("last 24 hours", "this week"),
-  not "the whole history".
+## Configuration
 
-**Connected clients (OAuth)**
-```bash
-docker compose run --rm ghostwriter mcp-sessions               # who is connected
-docker compose run --rm ghostwriter mcp-sessions --revoke-all  # log everyone out
-```
+Everything is set in `.env`; `.env.example` lists all options with comments. The main ones:
 
-**Update after changes in the repository**
-```bash
-cd ~/ch-sum && git pull && docker compose --profile https up -d --build
-```
-Always pass `--profile https`, otherwise Caddy (HTTPS) is not started.
-
-**Logs and status**
-```bash
-docker compose ps                        # both containers should be "Up"
-docker compose logs -f ghostwriter       # follow logs, Ctrl+C to stop
-curl https://<MCP_DOMAIN>/health         # should print "ok"
-```
-
-**After editing `.env`:** `docker compose --profile https up -d --force-recreate`
-(`docker compose restart` does not pick up `.env` changes).
-
-**Gotchas**
-- `sqlite3.OperationalError: unable to open database file` — the container runs as uid 1000 and
-  can't write the mounted folders: `sudo chown -R 1000:1000 data secrets persona`.
-- Run the bot in **one place only**. Two copies with the same bot token / Telegram session fight over
-  updates — stop the local copy (`docker compose down`) when the server one runs.
-- A traceback ending in `query is too old and response timeout expired` means a button was pressed
-  while the bot was down; it is harmless.
-- Oracle Cloud: ports 80/443 must be open both in the subnet's Security List and in the OS firewall
-  (`iptables`), and a 1 GB machine needs swap for `docker compose build`.
-
-## Расход токенов
-
-Дороже всего черновики: в промпт идут персона, `examples.md`, твои недавние сообщения (стиль),
-история и сообщения, на которые нужен ответ. Размер регулируется в `.env`:
-
-| Переменная | По умолчанию | Что ограничивает |
+| Variable | Default | |
 |---|---|---|
-| `HISTORY_LIMIT` | 15 | сообщений истории перед теми, на которые отвечаем |
-| `STYLE_SAMPLE_SIZE` | 15 | твоих сообщений как образец стиля (каждое обрезается до 300 символов) |
-| `REPLY_BATCH_LIMIT` | 6 | самых свежих неотвеченных сообщений, на которые пишется ответ |
-| `DRAFT_MESSAGE_CHARS` | 700 | символов от каждого длинного сообщения/пересланного поста |
-| `ESCALATION_HISTORY` | 8 | сообщений контекста для проверки на чувствительность |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | model for the control bot's own Claude calls |
+| `CONTACT_TG_ID` / `TG_CHAT` | — | default contact / chat (can be changed in the bot) |
+| `OWNER_NAME`, `CONTACT_NAME` | `Owner`, `Contact` | names used in prompts |
+| `ACTIVE_HOURS`, `TIMEZONE` | `09:00-23:00`, `Europe/Helsinki` | sending only inside this window |
+| `REPLY_DELAY_SECONDS` | `60-600` | random delay before sending |
+| `AUTO_MODE` | `false` | send non-escalated drafts without approval (card still shown, cancellable) |
 
-Держи `persona/examples.md` коротким (20–40 характерных сообщений): он уходит в каждый черновик.
-Саммари отправляют только сообщения за запрошенный период (без периода — последние 100).
+### Token usage
 
-## Через LiteLLM (и Langfuse)
+Drafts are the main cost: the prompt contains the persona, the examples, your recent messages, the
+history and the messages being answered. Limits:
 
-Ассистент может ходить к Claude не напрямую, а через твой LiteLLM. Тогда учёт расходов и трейсы
-в Langfuse настраиваются на стороне LiteLLM. В `.env`:
+| Variable | Default | Limits |
+|---|---|---|
+| `HISTORY_LIMIT` | 15 | history messages before the ones being answered |
+| `STYLE_SAMPLE_SIZE` | 15 | your messages used as a style reference (each cut to 300 chars) |
+| `REPLY_BATCH_LIMIT` | 6 | newest unanswered messages answered at once |
+| `DRAFT_MESSAGE_CHARS` | 700 | characters kept from each long message / forwarded post |
+| `ESCALATION_HISTORY` | 8 | context messages for the sensitive-topic check |
 
-```
-ANTHROPIC_BASE_URL=http://host.docker.internal:4000/anthropic
-ANTHROPIC_API_KEY=sk-...          # виртуальный ключ LiteLLM
-ANTHROPIC_MODEL=claude-sonnet-5   # модель Anthropic
-```
+Summaries send only the messages of the requested period (the last 100 if no period is given).
+Through the connector, everything Claude reads counts against your subscription limits.
 
-`/anthropic` — сквозной (pass-through) маршрут LiteLLM: запрос уходит в Anthropic как есть, поэтому
-структурированный вывод (`output_config`) и кэширование промптов работают без изменений. Можно
-указать и `http://host.docker.internal:4000` (общий эндпоинт `/v1/messages`). Тогда `ANTHROPIC_MODEL`
-должен совпадать с `model_name` из конфига LiteLLM, но новые параметры API LiteLLM может не передать.
+### Using an LLM gateway
 
-Через шлюз каждый запрос помечается тегами `ghostwriter` и назначением: `route` (разбор команды),
-`summary`, `question`, `escalation`, `draft`. LiteLLM передаёт их в Langfuse как теги трейса
-(фильтр Trace Tags), так видно, что сколько стоит и где модель ошиблась.
+The control bot can call Claude through any Anthropic-compatible gateway or proxy (for cost
+tracking, key management or tracing): set `ANTHROPIC_BASE_URL` to the gateway and
+`ANTHROPIC_API_KEY` to the key it issued. Prefer a pass-through route that forwards requests
+unchanged — the assistant relies on structured outputs. Through a gateway each request carries tags
+with its purpose (`route`, `summary`, `question`, `escalation`, `draft`), so its logs can be filtered
+by them. A gateway on the same host is reachable from the container as `http://host.docker.internal:<port>`.
 
-Если LiteLLM запущен в другом compose-проекте, вместо `host.docker.internal` можно подключить
-его сеть (закомментированный блок в `docker-compose.yml`) и писать `http://litellm:4000/anthropic`.
+## Security and privacy
 
-## Безопасность
+- **The Telegram session file (`secrets/`) is full access to your account** — treat it like a
+  password. `.env`, `secrets/`, `data/` and personal persona files are gitignored and never part of
+  the Docker image.
+- The control bot ignores everyone except `OWNER_TG_ID` and works only in a private chat.
+- The connector is behind an OAuth password login; tokens expire and can be revoked.
+- Message texts are not logged at INFO level.
+- The model is instructed never to invent facts about you, make commitments or say it is an AI;
+  when it can't answer without that, the message is escalated to you.
+- Telegram allows third-party clients on your own account (that's what `api_id` is for); it does not
+  allow spam or flooding. Don't message strangers and avoid huge history imports. A login from a new
+  data-centre IP may trigger a security check.
 
-- `.env`, `secrets/`, `*.session`, `data/`, `persona/context.md`, `persona/examples.md` и `persona/contacts/` в `.gitignore`.
-- Ответ в группу увидят все её участники: на карточке такого черновика есть строка «Куда: 👥 …».
-  **Файл сессии даёт полный доступ к твоему Telegram**, храни его как пароль.
-- Бот-пульт игнорирует всех, кроме `OWNER_TG_ID`, и работает только в личке.
-- На уровне INFO тексты сообщений не логируются; логи сторонних библиотек приглушены.
-- Модели запрещено выдумывать факты о тебе, давать обещания и признаваться, что она ИИ.
-  Если без этого не ответить, черновик превращается в эскалацию.
-- Telegram официально разрешает сторонние клиенты для своего аккаунта (для этого и выдаются
-  `api_id`/`api_hash`). Запрещены злоупотребления: спам, массовые рассылки, флуд запросами.
-  Используй свой `api_id`, не пиши незнакомым и не делай огромных `/sync`. Главные поводы для
-  проверки со стороны Telegram: вход с нового IP (особенно из дата-центра) и жалобы на спам.
-
-## Разработка
+## Development
 
 ```bash
 pytest -q
 ```
-Тесты не ходят в сеть: LLM, отправка и бот подменяются заглушками.
 
-## Открытые вопросы
+The tests don't use the network: the LLM, Telegram and the bot are replaced by fakes; the MCP server
+and its OAuth flow are tested over real local HTTP.
 
-- Почтовый провайдер. Сейчас сделан обычный IMAP/SMTP; для Gmail нужен app password и `IMAP_SENT_FOLDER="[Gmail]/Sent Mail"`.
-- SQLite или Supabase. Хранилище уже на SQLAlchemy: для Postgres/Supabase поставь `pip install ".[postgres]"` и `DATABASE_URL=postgresql+asyncpg://...`.
-- Голосовые сообщения пока сохраняются как `[voice message]` без расшифровки.
+## Limitations
+
+- Voice messages are stored as `[voice message]` without transcription.
+- Edited and deleted Telegram messages are not tracked.
+- Email belongs to the default contact only; messages sent by the assistant are not copied to the
+  *Sent* folder (Gmail does this itself).
+- One owner per installation.
